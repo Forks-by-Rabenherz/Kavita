@@ -210,7 +210,7 @@
         "platform-label": "Plattform",
         "email-label": "E-Mail",
         "name-label": "Name",
-        "email-setup-alert": "Möchten Sie Dateien an Ihre E-Mail-Adresse senden? Lassen Sie zunächst Ihren Administrator die E-Mail-Einstellungen vornehmen.",
+        "email-setup-alert": "Möchten Sie Dateien an Ihre E-Mail senden? Lassen Sie Ihren Administrator zunächst die E-Mail-Einstellungen konfigurieren!",
         "add": "{{common.add}}",
         "delete": "{{common.delete}}",
         "edit": "{{common.edit}}",
@@ -405,7 +405,7 @@
         "prequel": "Prequel",
         "sequel": "Nachfolger",
         "side-story": "Nebengeschichte",
-        "spin-off": "Spin-off",
+        "spin-off": "Spin-Off",
         "parent": "Übergeordnet",
         "edition": "Ausgabe",
         "annual": "Jährlich"
@@ -1259,7 +1259,8 @@
         "pending-tooltip": "Dieser Benutzer hat seine E-Mail nicht bestätigt",
         "all-libraries": "Alle Bibliotheken",
         "identity-provider-native-tooltip": "Muttersprachler",
-        "identity-provider-oidc-tooltip": "OIDC"
+        "identity-provider-oidc-tooltip": "OIDC",
+        "profile-link-alt": "Profil"
     },
     "edit-collection-tags": {
         "title": "Sammlung {{collectionName}} bearbeiten",
@@ -1417,7 +1418,8 @@
         "active-events-title": "Aktive Ereignisse:",
         "no-data": "Hier ist nicht viel los",
         "left-to-process": "Noch zu bearbeiten: {{leftToProcess}} / {{totalToProcess}}",
-        "download-in-queue": "{{num}} Downloads in der Warteschlange"
+        "download-in-queue": "{{num}} Downloads in der Warteschlange",
+        "reading-now": "{{num}} wird gerade gelesen"
     },
     "shortcuts-modal": {
         "title": "Tastaturkurzbefehle",
@@ -1604,7 +1606,8 @@
         "loading": "{{reader-settings.loading}}",
         "create-new": "{{reader-settings.create-new}}",
         "create-new-tooltip": "{{reader-settings.create-new-tooltip}}",
-        "page-offset-label": "Seitenversatz"
+        "page-offset-label": "Seitenversatz",
+        "offset-only-double": "Der Seitenversatz kann nur mit dem doppelten Layout verwendet werden"
     },
     "metadata-filter": {
         "filter-title": "{{common.filter}}",
@@ -1829,7 +1832,8 @@
         "not-classified": "Nicht klassifiziert",
         "total-file-size-title": "Gesamtgröße der Datei:",
         "download-file-for-extension-header": "Bericht herunterladen",
-        "download-file-for-extension-alt": "Dateien herunterladen Bericht für {{extension}}"
+        "download-file-for-extension-alt": "Dateien herunterladen Bericht für {{extension}}",
+        "no-data": "{{common.no-data}}"
     },
     "reading-activity": {
         "title": "Lese Aktivität",
@@ -1852,7 +1856,8 @@
         "visualisation-label": "Visualisierung",
         "data-table-label": "Daten-Tabelle",
         "year-header": "Jahr",
-        "count-header": "Zähler"
+        "count-header": "Zähler",
+        "no-data": "{{common.no-data}}"
     },
     "series-preview-drawer": {
         "staff-label": "Team",
@@ -2202,7 +2207,8 @@
         "confirm-force-delete-font": "Diese Schriftart wird derzeit verwendet. Möchten Sie sie zwangsweise löschen? Dadurch werden Benutzer zur Standardschriftart zurückgesetzt.",
         "font-in-use": "Kann nicht gelöscht werden, da die Schriftart von einem oder mehreren Benutzern verwendet wird.",
         "k+-resend-welcome-email-success": "Eine E-Mail wurde an Ihre Kavita+-E-Mail-Adresse gesendet",
-        "confirm-delete-auth-key": "Sind Sie sicher, dass Sie diesen Authentifizierungsschlüssel löschen möchten?"
+        "confirm-delete-auth-key": "Sind Sie sicher, dass Sie diesen Authentifizierungsschlüssel löschen möchten?",
+        "profile-unauthorized": "Dieser Benutzer teilt sein Profil nicht"
     },
     "read-time-pipe": {
         "less-than-hour": "<1 Stunde",
@@ -2375,7 +2381,7 @@
         "activity-tab": "Aktivität"
     },
     "common": {
-        "reset-to-default": "Alles zurücksetzen",
+        "reset-to-default": "Auf Standard zurücksetzen",
         "close": "Schließen",
         "clear": "Klar",
         "filter": "Filter",
@@ -2740,7 +2746,8 @@
         "page-calc-method-label": "{{reader-settings.page-calc-method-label}}",
         "page-calc-method-tooltip": "{{reader-settings.page-calc-method-tooltip}}",
         "set-devices": "Geräte einrichten",
-        "select-devices-for": "Geräte für {{name}} einrichten"
+        "select-devices-for": "Geräte für {{name}} einrichten",
+        "breakpoint-pipe-never": "{{breakpoint-pipe.never}}"
     },
     "bulk-set-reading-profile-modal": {
         "no-data": "Es wurden noch keine Sammlungen erstellt",
@@ -3281,7 +3288,7 @@
         "day-of-week-alt": "Tag der Woche",
         "pages": "Seiten",
         "words": "Wörter",
-        "chapters": "Kapitel",
+        "chapters": "Abgeschlossene Kapitel",
         "no-activity-alt": "Keine Aktivität",
         "all-time": "{{time-periods.all-time}}",
         "low-activity-alt": "Geringe Aktivität",
@@ -3315,7 +3322,8 @@
         "during-entire-life-server": "seit Beginn",
         "during-year": "während {{year}}",
         "during-from-to": "von {{startYear}} bis {{endYear}}",
-        "during-select": "Wählen Sie einen Zeitraum aus"
+        "during-select": "Wählen Sie einen Zeitraum aus",
+        "close": "{{common.close}}"
     },
     "time-frame-label": {
         "overall": "Insgesamt",
@@ -3394,16 +3402,13 @@
         "saturday": "Samstag",
         "saturday-short": "Sam"
     },
-    "ordinal-date-pipe": {
-        "ordinalFormat": "{{month}} {{day}}",
-        "ordinal": {
-            "st": "st",
-            "nd": "nd",
-            "rd": "rd",
-            "th": "th"
-        }
-    },
     "list-select-modal": {
         "hidden": "{{amount}} Artikel aufgrund eines ungültigen Status ausgeblendet"
+    },
+    "user-stats-info-cards": {
+        "pages-read-by-year-title": "Gelesene Seiten nach Jahr",
+        "pages-count": "{{num}} Seiten",
+        "words-read-by-year-title": "Wörter nach Jahr gelesen",
+        "words-count": "{{num}} Wörter"
     }
 }

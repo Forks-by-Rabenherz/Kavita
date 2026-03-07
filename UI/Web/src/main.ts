@@ -15,15 +15,13 @@ import {provideHttpClient, withFetch, withInterceptors} from '@angular/common/ht
 import {provideTransloco, TranslocoConfig, TranslocoService} from "@jsverse/transloco";
 import {environment} from "./environments/environment";
 import {AccountService} from "./app/_services/account.service";
-import {catchError, firstValueFrom, map, of, switchMap, tap} from "rxjs";
+import {catchError, firstValueFrom, of, switchMap, tap} from "rxjs";
 import {provideTranslocoLocale} from "@jsverse/transloco-locale";
 import {LazyLoadImageModule} from "ng-lazyload-image";
 import {getSaver, SAVER} from "./app/_providers/saver.provider";
 import {APP_BASE_HREF, PlatformLocation} from "@angular/common";
 import {provideTranslocoPersistTranslations} from '@jsverse/transloco-persist-translations';
 import {HttpLoader} from "./httpLoader";
-import {register as registerSwiperElements} from 'swiper/element/bundle';
-import {ColorPickerModule} from "@iplab/ngx-color-picker";
 import {clientInfoInterceptor} from "./app/_interceptors/client-info.interceptor";
 import {
   PreloadAllModules,
@@ -36,19 +34,18 @@ import {
 } from "@angular/router";
 import {KavitaTitleStrategy} from "./app/_services/kavita-title.strategy";
 import {routingErrorHandler} from "./app/_interceptors/routing-error.handler";
-import {registerECharts} from "./echarts";
 import {NgbModalConfig, NgbRatingConfig} from "@ng-bootstrap/ng-bootstrap";
 import {DefaultModalOptions} from "./app/_models/modal/modal-options";
 import {ToastNoAnimationModule} from "ngx-toastr";
 import {MessageHubService} from "src/app/_services/message-hub.service";
+import {DownloadService} from "./app/shared/_services/download.service";
+import {LibraryService} from "./app/_services/library.service";
 
 const disableAnimations = !('animate' in document.documentElement);
 if (disableAnimations) {
   document.documentElement.classList.add('no-animations');
 }
 
-registerSwiperElements();
-registerECharts();
 
 function transformLanguageCodes(arr: Array<string>) {
     const transformedArray: Array<string> = [];
@@ -130,6 +127,8 @@ function loadUserLocale(transloco: TranslocoService, accountService: AccountServ
 function bootstrapUser() {
   const accountService = inject(AccountService);
   const messageHubService = inject(MessageHubService);
+  const downloadService = inject(DownloadService);
+  const libraryService = inject(LibraryService);
   const transloco = inject(TranslocoService);
 
   // Load user from localStorage so refreshAccount() and locale loading can proceed
@@ -147,11 +146,15 @@ function bootstrapUser() {
     }),
     catchError(() => of(null)),
     switchMap(() => loadUserLocale(transloco, accountService)),
-    map(() => accountService.currentUser()),
-    tap(user => {
+    switchMap(() => {
+      const user = accountService.currentUser();
       if (user) {
-        messageHubService.createHubConnection(user)
+        messageHubService.createHubConnection(user);
+        return libraryService.cacheLibraryInfo().pipe(
+          tap(() => downloadService.restoreQueue())
+        );
       }
+      return of(null);
     }),
   ));
 }
@@ -168,8 +171,7 @@ bootstrapApplication(AppComponent, {
             countDuplicates: true,
             autoDismiss: true
           }),
-          NgCircleProgressModule.forRoot(),
-          ColorPickerModule,
+          NgCircleProgressModule.forRoot()
         ),
         provideRouter(routes,
           withComponentInputBinding(),

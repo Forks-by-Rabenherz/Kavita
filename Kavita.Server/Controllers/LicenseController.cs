@@ -50,7 +50,6 @@ public class LicenseController(
     /// </summary>
     /// <returns></returns>
     [HttpGet("has-license")]
-    [Authorize(PolicyGroups.AdminPolicy)]
     public async Task<ActionResult<bool>> HasLicense()
     {
         return Ok(!string.IsNullOrEmpty(
@@ -96,6 +95,11 @@ public class LicenseController(
     }
 
 
+    /// <summary>
+    /// Break the registration between Kavita+ and this instance
+    /// </summary>
+    /// <param name="dto"></param>
+    /// <returns></returns>
     [HttpPost("reset")]
     [Authorize(PolicyGroups.AdminPolicy)]
     public async Task<ActionResult> ResetLicense(UpdateLicenseDto dto)

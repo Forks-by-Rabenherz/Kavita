@@ -18,10 +18,11 @@ import {ImageService} from "../../_services/image.service";
 import {UploadService} from "../../_services/upload.service";
 import {AccountService} from "../../_services/account.service";
 import {ActionService} from "../../_services/action.service";
-import {DownloadService} from "../../shared/_services/download.service";
+import {DownloadService} from '../../shared/_services/download.service';
+import {DownloadEntityType} from '../../shared/_models/download-queue-item';
 import {LibraryType} from "../../_models/library/library";
 import {PersonRole} from "../../_models/metadata/person";
-import {forkJoin} from "rxjs";
+import {concat} from "rxjs";
 import {MangaFormat} from 'src/app/_models/manga-format';
 import {MangaFile} from "../../_models/manga-file";
 import {BreakpointService} from "../../_services/breakpoint.service";
@@ -29,14 +30,13 @@ import {ActionFactoryService} from "../../_services/action-factory.service";
 import {ActionItem} from "../../_models/actionables/action-item";
 import {Action} from "../../_models/actionables/action";
 import {modalDeleted, modalSaved} from "../../_models/modal/modal-result";
-
-enum TabID {
-  General = 'general-tab',
-  CoverImage = 'cover-image-tab',
-  Info = 'info-tab',
-  Tasks = 'tasks-tab',
-  Progress = 'progress-tab',
-}
+import {VolumeService} from "../../_services/volume.service";
+import {UpdateVolume} from "../../_models/update-volume";
+import {Tabs} from "../../_models/tabs";
+import {TabTitlePipe} from "../../_pipes/tab-title.pipe";
+import {
+  EditExternalMetadataFormComponent
+} from "../../shared/_components/edit-external-metadata-form/edit-external-metadata-form.component";
 
 
 @Component({
@@ -59,7 +59,9 @@ enum TabID {
     DefaultDatePipe,
     UtcToLocalTimePipe,
     BytesPipe,
-    ReadTimePipe
+    ReadTimePipe,
+    TabTitlePipe,
+    EditExternalMetadataFormComponent
   ],
   templateUrl: './edit-volume-modal.component.html',
   styleUrl: './edit-volume-modal.component.scss',
@@ -75,19 +77,15 @@ export class EditVolumeModalComponent implements OnInit {
   private readonly actionFactoryService = inject(ActionFactoryService);
   private readonly actionService = inject(ActionService);
   private readonly downloadService = inject(DownloadService);
+  private readonly volumeService = inject(VolumeService);
   protected readonly breakpointService = inject(BreakpointService);
-
-  protected readonly TabID = TabID;
-  protected readonly Action = Action;
-  protected readonly PersonRole = PersonRole;
-  protected readonly MangaFormat = MangaFormat;
 
   @Input({required: true}) volume!: Volume;
   @Input({required: true}) libraryType!: LibraryType;
   @Input({required: true}) libraryId!: number;
   @Input({required: true}) seriesId!: number;
 
-  activeId = TabID.Info;
+  activeId = Tabs.Info;
   editForm: FormGroup = new FormGroup({});
   selectedCover: string = '';
   coverImageReset = false;
@@ -103,7 +101,7 @@ export class EditVolumeModalComponent implements OnInit {
 
   constructor() {
     if (!this.accountService.hasAdminRole()) {
-      this.activeId = TabID.Info;
+      this.activeId = Tabs.Info;
       this.cdRef.markForCheck();
     }
   }
@@ -129,15 +127,20 @@ export class EditVolumeModalComponent implements OnInit {
   }
 
   save() {
+    const model = this.editForm.getRawValue();
     const selectedIndex = this.editForm.get('coverImageIndex')?.value || 0;
 
-    const apis = [];
+    const updateData = {id: this.volume.id, ...model} as UpdateVolume;
+
+    const apis = [
+      this.volumeService.updateVolume(updateData)
+    ];
 
     if (selectedIndex > 0 || this.coverImageReset) {
       apis.push(this.uploadService.updateVolumeCoverImage(this.volume.id, this.selectedCover, !this.coverImageReset));
     }
 
-    forkJoin(apis).subscribe(results => {
+    concat(...apis).subscribe(() => {
       const needsCoverUpdate = selectedIndex > 0 || this.coverImageReset;
       this.modal.close(modalSaved(this.volume, needsCoverUpdate));
     });
@@ -165,7 +168,7 @@ export class EditVolumeModalComponent implements OnInit {
         });
         break;
       case Action.Download:
-        this.downloadService.download('volume', this.volume, this.libraryId, this.seriesId);
+        this.downloadService.download(DownloadEntityType.Volume, this.volume, this.libraryId, this.seriesId);
         break;
     }
   }
@@ -189,4 +192,9 @@ export class EditVolumeModalComponent implements OnInit {
     });
     this.cdRef.markForCheck();
   }
+
+  protected readonly Tabs = Tabs;
+  protected readonly Action = Action;
+  protected readonly PersonRole = PersonRole;
+  protected readonly MangaFormat = MangaFormat;
 }

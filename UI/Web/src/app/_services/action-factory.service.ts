@@ -201,6 +201,7 @@ export class ActionFactoryService {
     if (!entity.hasOwnProperty('pagesRead') && !entity.hasOwnProperty('pages')) return true;
     switch (action.action) {
       case(Action.MarkAsRead):
+      case(Action.MarkAsReadWithSession):
         return entity.pagesRead < entity.pages;
       case(Action.MarkAsUnread):
         return entity.pagesRead !== 0;
@@ -374,6 +375,17 @@ export class ActionFactoryService {
         children: [],
       },
       {
+        action: Action.Download,
+        title: 'download',
+        description: 'download-tooltip',
+
+        callback: this.dummyCallback,
+        shouldRender: this.dummyShouldRender,
+
+        requiredRoles: [Role.Download],
+        children: [],
+      },
+      {
         action: Action.Delete,
         title: 'delete',
         description: 'delete-tooltip',
@@ -411,7 +423,7 @@ export class ActionFactoryService {
 
     this.seriesActions = [
       {
-        action: Action.MarkAsRead,
+        action: Action.Submenu,
         title: 'mark-as-read',
         description: 'mark-as-read-tooltip',
 
@@ -419,7 +431,30 @@ export class ActionFactoryService {
         shouldRender: this.dummyShouldRender,
 
         requiredRoles: [],
-        children: [],
+        children: [
+          {
+            action: Action.MarkAsRead,
+            title: 'mark-as-read',
+            description: 'mark-as-read-tooltip',
+
+            callback: this.dummyCallback,
+            shouldRender: this.dummyShouldRender,
+
+            requiredRoles: [],
+            children: [],
+          },
+          {
+            action: Action.MarkAsReadWithSession,
+            title: 'mark-as-read-with-session',
+            description: 'mark-as-read-with-session-tooltip',
+
+            callback: this.dummyCallback,
+            shouldRender: this.dummyShouldRender,
+
+            requiredRoles: [],
+            children: [],
+          }
+        ],
       },
       {
         action: Action.MarkAsUnread,
@@ -467,7 +502,7 @@ export class ActionFactoryService {
           {
             action: Action.RemoveFromWantToReadList,
             title: 'remove-from-want-to-read',
-            description: 'remove-to-want-to-read-tooltip',
+            description: 'remove-from-want-to-read-tooltip',
 
             callback: this.dummyCallback,
             shouldRender: this.dummyShouldRender,
@@ -664,7 +699,7 @@ export class ActionFactoryService {
         children: [],
       },
       {
-        action: Action.MarkAsRead,
+        action: Action.Submenu,
         title: 'mark-as-read',
         description: 'mark-as-read-tooltip',
 
@@ -672,7 +707,30 @@ export class ActionFactoryService {
         shouldRender: this.dummyShouldRender,
 
         requiredRoles: [],
-        children: [],
+        children: [
+          {
+            action: Action.MarkAsRead,
+            title: 'mark-as-read',
+            description: 'mark-as-read-tooltip',
+
+            callback: this.dummyCallback,
+            shouldRender: this.dummyShouldRender,
+
+            requiredRoles: [],
+            children: [],
+          },
+          {
+            action: Action.MarkAsReadWithSession,
+            title: 'mark-as-read-with-session',
+            description: 'mark-as-read-with-session-tooltip',
+
+            callback: this.dummyCallback,
+            shouldRender: this.dummyShouldRender,
+
+            requiredRoles: [],
+            children: [],
+          }
+        ],
       },
       {
         action: Action.MarkAsUnread,
@@ -794,7 +852,7 @@ export class ActionFactoryService {
         children: [],
       },
       {
-        action: Action.MarkAsRead,
+        action: Action.Submenu,
         title: 'mark-as-read',
         description: 'mark-as-read-tooltip',
 
@@ -802,7 +860,30 @@ export class ActionFactoryService {
         shouldRender: this.dummyShouldRender,
 
         requiredRoles: [],
-        children: [],
+        children: [
+          {
+            action: Action.MarkAsRead,
+            title: 'mark-as-read',
+            description: 'mark-as-read-tooltip',
+
+            callback: this.dummyCallback,
+            shouldRender: this.dummyShouldRender,
+
+            requiredRoles: [],
+            children: [],
+          },
+          {
+            action: Action.MarkAsReadWithSession,
+            title: 'mark-as-read-with-session',
+            description: 'mark-as-read-with-session-tooltip',
+
+            callback: this.dummyCallback,
+            shouldRender: this.dummyShouldRender,
+
+            requiredRoles: [],
+            children: [],
+          }
+        ],
       },
       {
         action: Action.MarkAsUnread,
@@ -925,6 +1006,17 @@ export class ActionFactoryService {
         children: [],
       },
       {
+        action: Action.Download,
+        title: 'download',
+        description: 'download-tooltip',
+
+        callback: this.dummyCallback,
+        shouldRender: this.dummyShouldRender,
+
+        requiredRoles: [Role.Download],
+        children: [],
+      },
+      {
         action: Action.Delete,
         title: 'delete',
         description: 'delete-tooltip',
@@ -958,6 +1050,38 @@ export class ActionFactoryService {
         requiredRoles: [],
         children: [],
       },
+      {
+        action: Action.Submenu,
+        title: 'export',
+        description: 'export-tooltip',
+
+        callback: this.dummyCallback,
+        shouldRender: this.dummyShouldRender,
+
+        requiredRoles: [],
+        children: [
+          {
+            action: Action.ExportAsV1,
+            title: 'export-v1',
+            description: 'export-v1-tooltip',
+
+            callback: this.dummyCallback,
+            shouldRender: this.dummyShouldRender,
+            requiredRoles: [],
+            children: [],
+          },
+          {
+            action: Action.ExportAsV2,
+            title: 'export-v2',
+            description: 'export-v2-tooltip',
+
+            callback: this.dummyCallback,
+            shouldRender: this.dummyShouldRender,
+            requiredRoles: [],
+            children: [],
+          }
+        ],
+      }
     ];
 
     this.personActions = [

@@ -7,6 +7,7 @@ using Kavita.API.Database;
 using Kavita.API.Repositories;
 using Kavita.API.Services;
 using Kavita.API.Services.Reading;
+using Kavita.API.Services.ReadingLists;
 using Kavita.API.Services.SignalR;
 using Kavita.Common;
 using Kavita.Common.Extensions;
@@ -536,7 +537,6 @@ public class SeriesService(
         }
 
         var specials = new List<ChapterDto>();
-        // Why isn't this doing a check if chapter is not special as it wont get included
         var chapters = volumes
             .SelectMany(v => v.Chapters
                 .Select(c =>

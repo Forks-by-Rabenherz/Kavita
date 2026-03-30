@@ -68,7 +68,8 @@ export enum SettingsTabId {
   Scrobbling = 'scrobbling',
   ScrobblingHolds = 'scrobble-holds',
   Customize = 'customize',
-  CBLImport = 'cbl-import'
+  CBLImport = 'cbl-import',
+  RemapRules = 'remap-rules',
 }
 
 export enum SettingSectionId {
@@ -145,6 +146,8 @@ export class PreferenceNavComponent implements AfterViewInit {
   private readonly keyBindService = inject(KeyBindService);
   protected readonly breakpointService = inject(BreakpointService);
 
+  readonly hasValidLicense$ = toObservable(this.licenseService.hasValidLicense);
+
   private readonly navEnd = toSignal(
     this.router.events.pipe(
       filter((event): event is NavigationEnd => event instanceof NavigationEnd)
@@ -160,7 +163,7 @@ export class PreferenceNavComponent implements AfterViewInit {
   private readonly matchedMetadataBadgeCount = toSignal(
     toObservable(this.accountService.hasAdminRole).pipe(
       take(1),
-      filter(_ => this.licenseService.hasValidLicenseSignal()),
+      filter(_ => this.licenseService.hasValidLicense()),
       switchMap(isAdmin => {
         if (!isAdmin) return of(-1);
         return this.manageService.getAllKavitaPlusSeries({
@@ -238,6 +241,7 @@ export class PreferenceNavComponent implements AfterViewInit {
           new SideNavItem(SettingsTabId.Theme),
           new SideNavItem(SettingsTabId.Font),
           new SideNavItem(SettingsTabId.Devices),
+          new SideNavItem(SettingsTabId.RemapRules, [], undefined, [Role.ReadOnly]),
         ]
       },
       {
@@ -295,7 +299,7 @@ export class PreferenceNavComponent implements AfterViewInit {
 
     // Refresh visibility if license changes
     effect(() => {
-      this.licenseService.hasValidLicenseSignal();
+      this.licenseService.hasValidLicense();
       this.cdRef.markForCheck();
     });
 
@@ -304,7 +308,7 @@ export class PreferenceNavComponent implements AfterViewInit {
       () => this.router.navigate(['/settings'], { fragment: SettingsTabId.Scrobbling})
         .then(() => this.scrollToActiveItem()),
       [KeyBindTarget.NavigateToScrobbling],
-      {condition$: this.licenseService.hasValidLicense$},
+      {condition$: this.hasValidLicense$},
     );
   }
 
@@ -327,7 +331,7 @@ export class PreferenceNavComponent implements AfterViewInit {
   }
 
   isItemVisible(user: User, item: SideNavItem) {
-    return this.accountService.hasAnyRole(user, item.roles, item.restrictRoles) && (!item.kPlusOnly || this.licenseService.hasValidLicenseSignal())
+    return this.accountService.hasAnyRole(user, item.roles, item.restrictRoles) && (!item.kPlusOnly || this.licenseService.hasValidLicense())
   }
 
   collapse() {

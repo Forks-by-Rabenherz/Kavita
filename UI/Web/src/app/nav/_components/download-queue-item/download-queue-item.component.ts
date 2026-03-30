@@ -1,5 +1,5 @@
 import {ChangeDetectionStrategy, Component, computed, inject, input, output} from '@angular/core';
-import {DownloadQueueItem} from '../../../shared/_models/download-queue-item';
+import {DownloadEntityType, DownloadQueueItem} from '../../../shared/_models/download-queue-item';
 import {BytesPipe} from '../../../_pipes/bytes.pipe';
 import {TranslocoDirective} from "@jsverse/transloco";
 import {ImageComponent} from '../../../shared/image/image.component';
@@ -29,9 +29,12 @@ export class DownloadQueueItemComponent {
   readonly imageUrl = computed(() => {
     const item = this.item();
 
-    return item.entityType === 'volume'
-      ? this.imageService.getVolumeCoverImage(item.entityId)
-      : this.imageService.getChapterCoverImage(item.entityId)
+    switch (item.entityType) {
+      case DownloadEntityType.Volume: return this.imageService.getVolumeCoverImage(item.entityId);
+      case DownloadEntityType.Chapter: return this.imageService.getChapterCoverImage(item.entityId);
+      case DownloadEntityType.ReadingListItem: return this.imageService.getChapterCoverImage(item.chapterId!);
+    }
+    return '';
   });
 
   readonly statusBadgeColor = computed<TagBadgeColor>(() => {

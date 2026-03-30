@@ -92,8 +92,8 @@ public interface ISeriesRepository
     Task<IList<Series>> GetSeriesByIdsAsync(IList<int> seriesIds, bool fullSeries = true, CancellationToken ct = default);
     Task<int[]> GetChapterIdsForSeriesAsync(IList<int> seriesIds, CancellationToken ct = default);
     Task<IDictionary<int, IList<int>>> GetChapterIdWithSeriesIdForSeriesAsync(int[] seriesIds, CancellationToken ct = default);
-    Task<long> GetFilesizeForSeriesAsync(int seriesId, CancellationToken ct = default);
-    Task<Dictionary<int, long>> GetFilesizeForMultipleSeriesAsync(IList<int> seriesIds, CancellationToken ct = default);
+    Task<long> GetFilesizeAsync(int seriesId, CancellationToken ct = default);
+    Task<Dictionary<int, long>> GetFilesizesAsync(IList<int> seriesIds, CancellationToken ct = default);
     Task<string?> GetSeriesCoverImageAsync(int seriesId, CancellationToken ct = default);
     Task<PagedList<SeriesDto>> GetOnDeck(int userId, int libraryId, UserParams userParams, FilterDto? filter, CancellationToken ct = default);
     Task<PagedList<SeriesDto>> GetRecentlyAdded(int libraryId, int userId, UserParams userParams, FilterDto filter, CancellationToken ct = default);
@@ -125,6 +125,8 @@ public interface ISeriesRepository
     Task<Series?> GetSeriesThatContainsLowestFolderPath(string path, SeriesIncludes includes = SeriesIncludes.None, CancellationToken ct = default);
     Task<IEnumerable<Series>> GetAllSeriesByNameAsync(IList<string> normalizedNames,
         int userId, SeriesIncludes includes = SeriesIncludes.None, CancellationToken ct = default);
+    Task<IEnumerable<Series>> GetAllSeriesByNameAsync(IList<string> normalizedNames,
+        int userId, IList<int>? libraryIds, SeriesIncludes includes = SeriesIncludes.None, CancellationToken ct = default);
     Task<Series?> GetFullSeriesByAnyName(string seriesName, string localizedName, int libraryId, MangaFormat format, bool withFullIncludes = true, CancellationToken ct = default);
     Task<Series?> GetSeriesByAnyName(IList<string> names, IList<MangaFormat> formats,
         int userId, int? aniListId = null, SeriesIncludes includes = SeriesIncludes.None, CancellationToken ct = default);

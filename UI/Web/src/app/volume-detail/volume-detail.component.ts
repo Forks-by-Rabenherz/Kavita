@@ -1,3 +1,4 @@
+import {DownloadEntityType} from '../shared/_models/download-queue-item';
 import {
   ChangeDetectionStrategy,
   ChangeDetectorRef,
@@ -35,7 +36,7 @@ import {
 import {FilterUtilitiesService} from "../shared/_services/filter-utilities.service";
 import {Chapter, LooseLeafOrDefaultNumber} from "../_models/chapter";
 import {LibraryType} from "../_models/library/library";
-import {tap} from "rxjs";
+import {filter, tap} from "rxjs";
 import {takeUntilDestroyed} from "@angular/core/rxjs-interop";
 import {translate, TranslocoDirective} from "@jsverse/transloco";
 import {FilterComparison} from "../_models/metadata/v2/filter-comparison";
@@ -87,14 +88,9 @@ import {ModalService} from "../_services/modal.service";
 import {getResolvedData, getWritableResolvedData} from "../../libs/route-util";
 import {ModalResult} from "../_models/modal/modal-result";
 import {ChapterCardComponent} from "../cards/chapter-card/chapter-card.component";
-
-enum TabID {
-  Chapters = 'chapters-tab',
-  Related = 'related-tab',
-  Reviews = 'reviews-tab', // Only applicable for books
-  Details = 'details-tab',
-  Annotations = 'annotations-tab'
-}
+import {Tabs} from "../_models/tabs";
+import {TabTitlePipe} from "../_pipes/tab-title.pipe";
+import {EntityTitleService} from "../_services/entity-title.service";
 
 interface VolumeCast extends IHasCast {
   characterLocked: boolean;
@@ -161,13 +157,15 @@ interface VolumeCast extends IHasCast {
     UtcToLocalDatePipe,
     ReadingProgressStatusPipePipe,
     ReadingProgressIconPipePipe,
-    ChapterCardComponent
+    ChapterCardComponent,
+    TabTitlePipe
   ],
   templateUrl: './volume-detail.component.html',
   styleUrl: './volume-detail.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class VolumeDetailComponent implements OnInit {
+  protected readonly DownloadEntityType = DownloadEntityType;
   private readonly document = inject(DOCUMENT);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
@@ -189,6 +187,7 @@ export class VolumeDetailComponent implements OnInit {
   private readonly chapterService = inject(ChapterService);
   private readonly annotationService = inject(AnnotationService);
   protected readonly breakpointService = inject(BreakpointService);
+  private readonly entityTitleService = inject(EntityTitleService);
 
   readonly scrollingBlock = viewChild<ElementRef<HTMLDivElement>>('scrollingBlock');
 
@@ -206,7 +205,7 @@ export class VolumeDetailComponent implements OnInit {
 
   isLoading = signal(true);
 
-  activeTabId = TabID.Chapters;
+  activeTabId = Tabs.Chapters;
   readingLists = signal<ReadingList[]>([]);
 
   // Only populated if the volume has exactly one chapter
@@ -324,7 +323,7 @@ export class VolumeDetailComponent implements OnInit {
     return Math.max(...chapters.map(c => c.ageRating));
   });
 
-  chapterTabName = computed(() => this.utilityService.formatChapterName(this.libraryType(), false, false, true));
+  chapterTabName = computed(() => this.entityTitleService.formatChapterName(this.libraryType(), true));
   reviewCount = computed(() => this.userReviews().length + this.plusReviews().length);
 
 
@@ -393,8 +392,8 @@ export class VolumeDetailComponent implements OnInit {
     this.themeService.setColorScape(this.volume()!.primaryColor, this.volume()!.secondaryColor);
 
     this.route.fragment.pipe(tap(frag => {
-      if (frag !== null && this.activeTabId !== (frag as TabID)) {
-        this.activeTabId = frag as TabID;
+      if (frag !== null && this.activeTabId !== (frag as Tabs)) {
+        this.activeTabId = frag as Tabs;
         this.updateUrl(this.activeTabId);
         this.cdRef.markForCheck();
       }
@@ -444,11 +443,10 @@ export class VolumeDetailComponent implements OnInit {
     ref.componentInstance.libraryId = this.libraryId();
     ref.componentInstance.seriesId = this.seriesId();
 
-    ref.closed.subscribe((res: ModalResult<Volume>) => {
-      if (res.success && res.data) {
-        this.volume.set({...res.data});
-      }
-    });
+    ref.closed.pipe(
+      filter((res: ModalResult<Volume>) => res.success),
+      tap(() => this.loadVolume())
+    ).subscribe();
   }
 
 
@@ -458,7 +456,7 @@ export class VolumeDetailComponent implements OnInit {
     this.cdRef.markForCheck();
   }
 
-  updateUrl(activeTab: TabID) {
+  updateUrl(activeTab: Tabs) {
     const tokens = this.location.path().split('#');
     const newUrl = `${tokens[0]}#${activeTab}`;
     this.location.replaceState(newUrl)
@@ -473,6 +471,7 @@ export class VolumeDetailComponent implements OnInit {
   shouldRenderVolumeAction(action: ActionItem<Volume>, entity: Volume, _: User) {
     switch (action.action) {
       case(Action.MarkAsRead):
+      case(Action.MarkAsReadWithSession):
         return entity.pagesRead < entity.pages;
       case(Action.MarkAsUnread):
         return entity.pagesRead !== 0;
@@ -487,7 +486,7 @@ export class VolumeDetailComponent implements OnInit {
 
 
   switchTabsToDetail() {
-    this.activeTabId = TabID.Details;
+    this.activeTabId = Tabs.Details;
     this.cdRef.markForCheck();
     setTimeout(() => {
       const tabElem = this.document.querySelector('#details-tab');
@@ -515,7 +514,7 @@ export class VolumeDetailComponent implements OnInit {
 
   protected readonly Breakpoint = Breakpoint;
   protected readonly AgeRating = AgeRating;
-  protected readonly TabID = TabID;
+  protected readonly Tabs = Tabs;
   protected readonly FilterField = FilterField;
   protected readonly encodeURIComponent = encodeURIComponent;
 }

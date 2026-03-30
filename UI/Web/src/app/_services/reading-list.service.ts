@@ -6,7 +6,6 @@ import {UtilityService} from '../shared/_services/utility.service';
 import {Person, PersonRole} from '../_models/metadata/person';
 import {PaginatedResult} from '../_models/pagination';
 import {ReadingList, ReadingListCast, ReadingListInfo, ReadingListItem} from '../_models/reading-list';
-import {CblImportSummary} from '../_models/reading-list/cbl/cbl-import-summary';
 import {TextResonse} from '../_types/text-response';
 import {ActionItem} from "../_models/actionables/action-item";
 import {Action} from "../_models/actionables/action";
@@ -105,14 +104,6 @@ export class ReadingListService {
     return this.httpClient.get<boolean>(this.baseUrl + 'readinglist/name-exists?name=' + name);
   }
 
-  validateCbl(form: FormData, dryRun: boolean, useComicVineMatching: boolean) {
-    return this.httpClient.post<CblImportSummary>(this.baseUrl + `cbl/validate?dryRun=${dryRun}&useComicVineMatching=${useComicVineMatching}`, form);
-  }
-
-  importCbl(form: FormData, dryRun: boolean, useComicVineMatching: boolean) {
-    return this.httpClient.post<CblImportSummary>(this.baseUrl + `cbl/import?dryRun=${dryRun}&useComicVineMatching=${useComicVineMatching}`, form);
-  }
-
   getPeople(readingListId: number, role: PersonRole) {
     return this.httpClient.get<Array<Person>>(this.baseUrl + `readinglist/people?readingListId=${readingListId}&role=${role}`);
   }
@@ -134,6 +125,5 @@ export class ReadingListService {
   deleteMultipleReadingLists(listIds: Array<number>) {
     return this.httpClient.post(this.baseUrl + 'readinglist/delete-multiple', {readingListIds: listIds}, TextResonse);
   }
-
 
 }

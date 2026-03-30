@@ -78,7 +78,6 @@ public interface IUserRepository
     Task<IEnumerable<UserTokenInfo>> GetUserTokenInfo(CancellationToken ct = default);
     Task<AppUser?> GetUserByDeviceEmail(string deviceEmail, CancellationToken ct = default);
     Task<AppUser?> GetByOidcId(string? oidcId, AppUserIncludes includes = AppUserIncludes.None, CancellationToken ct = default);
-    Task UpdateUserAsActive(int userId, CancellationToken ct = default);
     #endregion
 
     #region Ratings & Reviews
@@ -113,7 +112,7 @@ public interface IUserRepository
     #endregion
 
     #region Permissions
-    Task<bool> HasAccessToLibrary(int libraryId, int userId, CancellationToken ct = default);
+    Task<bool> HasAccessToLibrary(int userId, int libraryId, CancellationToken ct = default);
     Task<bool> HasAccessToSeries(int userId, int seriesId, CancellationToken ct = default);
     Task<bool> HasAccessToVolume(int userId, int volumeId, CancellationToken ct = default);
     Task<bool> HasAccessToChapter(int userId, int chapterId, CancellationToken ct = default);

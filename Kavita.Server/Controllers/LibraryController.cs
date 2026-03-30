@@ -117,7 +117,7 @@ public class LibraryController(
         }
 
         // Assign all the necessary users with this library side nav
-        var userIds = admins.Select(u => u.Id).Append(UserId).ToList();
+        var userIds = admins.Select(u => u.Id).ToList();
         var userNeedingNewLibrary = (await unitOfWork.UserRepository.GetAllUsersAsync(AppUserIncludes.SideNavStreams))
             .Where(u => userIds.Contains(u.Id))
             .ToList();
@@ -198,12 +198,10 @@ public class LibraryController(
     /// <summary>
     /// Return a specific library
     /// </summary>
-    /// <remarks>If the user is not an admin, only id, type, and name will be returned</remarks>
+    /// <remarks>If the user is not an admin, only id, type, and name will be returned (<see cref="LiteLibraryDto"/>)</remarks>
     /// <returns></returns>
     [HttpGet]
     [LibraryAccess]
-    [ProducesResponseType<LibraryDto>(StatusCodes.Status200OK)]
-    [ProducesResponseType<LiteLibraryDto>(StatusCodes.Status200OK)]
     public async Task<ActionResult<LibraryDto?>> GetLibrary(int libraryId)
     {
         if (User.IsInRole(PolicyConstants.AdminRole))
@@ -504,7 +502,7 @@ public class LibraryController(
     /// <returns></returns>
     [HttpDelete("delete-multiple")]
     [Authorize(Policy = PolicyGroups.AdminPolicy)]
-    public async Task<ActionResult<bool>> DeleteMultipleLibraries([FromQuery] List<int> libraryIds)
+    public async Task<ActionResult<bool>> DeleteMultipleLibraries([FromBody] List<int> libraryIds)
     {
         var username = Username!;
 

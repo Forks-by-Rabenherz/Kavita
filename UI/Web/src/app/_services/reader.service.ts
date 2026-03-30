@@ -183,20 +183,24 @@ export class ReaderService {
     return this.httpClient.post(this.baseUrl + 'reader/progress', {libraryId, seriesId, volumeId, chapterId, pageNum: page, bookScrollId});
   }
 
-  markVolumeRead(seriesId: number, volumeId: number) {
-    return this.httpClient.post(this.baseUrl + 'reader/mark-volume-read', {seriesId, volumeId});
+  markChapterRead(seriesId: number, chapterId: number, generateReadingSession: boolean = false) {
+    return this.httpClient.post(this.baseUrl + 'reader/mark-chapter-read', {seriesId, chapterId, generateReadingSession});
   }
 
-  markMultipleRead(seriesId: number, volumeIds: Array<number>,  chapterIds?: Array<number>) {
-    return this.httpClient.post(this.baseUrl + 'reader/mark-multiple-read', {seriesId, volumeIds, chapterIds});
+  markVolumeRead(seriesId: number, volumeId: number, generateReadingSession: boolean = false) {
+    return this.httpClient.post(this.baseUrl + 'reader/mark-volume-read', {seriesId, volumeId, generateReadingSession});
+  }
+
+  markMultipleRead(seriesId: number, volumeIds: Array<number>,  chapterIds?: Array<number>, generateReadingSession: boolean = false) {
+    return this.httpClient.post(this.baseUrl + 'reader/mark-multiple-read', {seriesId, volumeIds, chapterIds, generateReadingSession});
   }
 
   markMultipleUnread(seriesId: number, volumeIds: Array<number>,  chapterIds?: Array<number>) {
     return this.httpClient.post(this.baseUrl + 'reader/mark-multiple-unread', {seriesId, volumeIds, chapterIds});
   }
 
-  markMultipleSeriesRead(seriesIds: Array<number>) {
-    return this.httpClient.post(this.baseUrl + 'reader/mark-multiple-series-read', {seriesIds});
+  markMultipleSeriesRead(seriesIds: Array<number>, generateReadingSession: boolean = false) {
+    return this.httpClient.post(this.baseUrl + 'reader/mark-multiple-series-read', {seriesIds, generateReadingSession});
   }
 
   markMultipleSeriesUnread(seriesIds: Array<number>) {
@@ -670,13 +674,13 @@ export class ReaderService {
     ).catch(err => console.error(err)));
   }
 
-  private handlePrompt<T>(prompt: RereadPrompt, incognitoMode: boolean) {
+  private handlePrompt(prompt: RereadPrompt, incognitoMode: boolean) {
     if (incognitoMode) return of({prompt: prompt, result: RereadPromptResult.ReadIncognito});
 
     if (!prompt.shouldPrompt) return of({prompt: prompt, result: RereadPromptResult.Continue});
 
 
-    const ref = this.modalService.open<ListSelectModalComponent<T>>(ListSelectModalComponent, mediumModal());
+    const ref = this.modalService.open<ListSelectModalComponent<RereadPromptResult>>(ListSelectModalComponent, mediumModal());
 
     ref.setInput('showFooter', false);
     ref.setInput('title', translate('reread-modal.title'));

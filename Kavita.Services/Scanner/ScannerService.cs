@@ -137,13 +137,22 @@ public class ScannerService(
 
         // This is basically rework of what's already done in Library Watcher but is needed if invoked via API
         var parentDirectory = directoryService.GetParentDirectoryName(folder);
-        if (string.IsNullOrEmpty(parentDirectory)) return;
+        if (string.IsNullOrEmpty(parentDirectory))
+        {
+            logger.LogWarning("[ScannerService] Scan folder invoked for {Folder} but parent directory is empty. Dropping request", folder);
+            return;
+        }
 
         var libraries = (await unitOfWork.LibraryRepository.GetLibraryDtosAsync()).ToList();
         var libraryFolders = libraries.SelectMany(l => l.Folders);
         var libraryFolder = libraryFolders.Select(Parser.Normalize).FirstOrDefault(f => f.Contains(parentDirectory));
 
-        if (string.IsNullOrEmpty(libraryFolder)) return;
+        if (string.IsNullOrEmpty(libraryFolder))
+        {
+            logger.LogWarning("[ScannerService] Scan folder invoked for {Folder} but no matching library found. Dropping request", folder);
+            return;
+        }
+
         var library = libraries.Find(l => l.Folders.Select(Parser.NormalizePath).Contains(libraryFolder));
 
         if (library != null)
@@ -730,7 +739,8 @@ public class ScannerService(
     /// <param name="libraryName"></param>
     /// <param name="forceUpdate"></param>
     /// <returns>The total amount of processed files</returns>
-    private async Task<long> DbMetadataTask(Channel<int> channel, MetadataSettingsDto settings, IList<IList<ParserInfo>> toProcess, int libraryId, string libraryName, bool forceUpdate)
+    private async Task<long> DbMetadataTask(Channel<int> channel, MetadataSettingsDto settings,
+        IList<IList<ParserInfo>> toProcess, int libraryId, string libraryName, bool forceUpdate)
     {
         var totalFiles = 0;
         var seriesLeftToProcess = toProcess.Count;
@@ -748,7 +758,8 @@ public class ScannerService(
                 var processSeries = scope.ServiceProvider.GetRequiredService<IProcessSeries>();
 
                 // Library needs to be returned from the used UnitOfWork
-                var library = (await unitOfWork.LibraryRepository.GetLibraryForIdAsync(libraryId, LibraryIncludes.Folders | LibraryIncludes.FileTypes | LibraryIncludes.ExcludePatterns))!;
+                var library = (await unitOfWork.LibraryRepository.GetLibraryForIdAsync(libraryId,
+                    LibraryIncludes.Folders | LibraryIncludes.FileTypes | LibraryIncludes.ExcludePatterns))!;
 
                 var seriesId = await processSeries.ProcessSeriesAsync(settings, pSeries, new ProcessSeriesArgs
                 {

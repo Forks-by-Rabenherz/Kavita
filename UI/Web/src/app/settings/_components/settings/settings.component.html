@@ -92,6 +92,14 @@
             }
           }
 
+          @case (SettingsTabId.RemapRules) {
+            @defer (prefetch on idle) {
+              <div class="scale col-md-12">
+                <app-manage-remap-rules />
+              </div>
+            }
+          }
+
           @case (SettingsTabId.ManageMetadata) {
             @if (accountService.hasAdminRole()) {
               @defer (prefetch on idle) {
@@ -163,7 +171,7 @@
           }
 
           @case (SettingsTabId.MatchedMetadata) {
-            @if (accountService.hasAdminRole()) {
+            @if (accountService.hasAdminRole() && licenseService.hasValidLicense()) {
               @defer (prefetch on idle) {
                 <div class="scale col-md-12">
                   <app-manage-matched-metadata />
@@ -237,13 +245,7 @@
           @case (SettingsTabId.Account) {
             @defer (prefetch on idle) {
               <div class="col-xxl-6 col-12">
-                <app-change-email />
-                <div class="setting-section-break"></div>
-                <app-change-password />
-                <div class="setting-section-break"></div>
-                <app-change-age-restriction />
-                <div class="setting-section-break"></div>
-                <app-manage-scrobbling-providers />
+                <app-account-settings />
               </div>
             }
           }
@@ -307,10 +309,11 @@
           @case (SettingsTabId.CBLImport) {
             @defer (prefetch on idle) {
               <div class="scale col-md-12">
-                <app-import-cbl />
+                <app-cbl-manager />
               </div>
             }
           }
+
 
           @case (SettingsTabId.ReadingProfiles) {
             @defer (prefetch on idle) {

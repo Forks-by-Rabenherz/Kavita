@@ -34,7 +34,8 @@ import {
 } from "../cards/_modals/bulk-set-reading-profile-modal/bulk-set-reading-profile-modal.component";
 import {EditSeriesModalComponent} from "../cards/_modals/edit-series-modal/edit-series-modal.component";
 import {EditVolumeModalComponent} from "../_single-module/edit-volume-modal/edit-volume-modal.component";
-import {DownloadService} from "../shared/_services/download.service";
+import {DownloadService} from '../shared/_services/download.service';
+import {DownloadEntityType} from '../shared/_models/download-queue-item';
 import {ReadingProfileService} from "./reading-profile.service";
 import {Action} from "../_models/actionables/action";
 import {ActionItem} from "../_models/actionables/action-item";
@@ -61,6 +62,7 @@ import {NavService} from "./nav.service";
 import {ModalResult} from "../_models/modal/modal-result";
 import {addToModal, editModal} from "../_models/modal/modal-options";
 import {ModalService, TypedModalRef} from "./modal.service";
+import {FilterService} from "src/app/_services/filter.service";
 
 
 export type LibraryActionCallback = (library: Partial<Library>) => void;
@@ -98,8 +100,9 @@ export class ActionService {
   private readonly router = inject(Router);
   private readonly annotationsService = inject(AnnotationService);
   private readonly sideNavService = inject(NavService);
+  private readonly filterService = inject(FilterService);
 
-  private readingListModalRef: TypedModalRef<ListSelectModalComponent<ReadingList>> | null = null;
+  private readingListModalRef: TypedModalRef<BulkSetReadingProfileModalComponent> |  TypedModalRef<ListSelectModalComponent<ReadingList>> | null = null;
   private collectionModalRef: TypedModalRef<ListSelectModalComponent<UserCollection>> | null = null;
 
 
@@ -170,7 +173,9 @@ export class ActionService {
   handleSeriesAction(action: ActionItem<Series>, series: Series) {
     switch (action.action) {
       case Action.MarkAsRead:
-        return this.seriesService.markRead(series.id).pipe(
+      case Action.MarkAsReadWithSession:
+        const generateReadingSession = action.action === Action.MarkAsReadWithSession;
+        return this.seriesService.markRead(series.id, generateReadingSession).pipe(
           tap(() => this.toastr.success(translate('toasts.entity-read', {name: series.name}))),
           map(() => this.fromAction(action, { ...series, pagesRead: series.pages }, 'update'))
         );
@@ -328,7 +333,7 @@ export class ActionService {
       }
 
       case Action.Download:
-        this.downloadService.download('series', series, series.libraryId, series.id);
+        this.downloadService.download(DownloadEntityType.Series, series, series.libraryId, series.id);
         return of(this.fromAction(action, series, 'none'));
 
       case Action.AddToWantToReadList:
@@ -378,7 +383,9 @@ export class ActionService {
   handleVolumeAction(action: ActionItem<Volume>, volume: Volume, seriesId: number, libraryId: number, libraryType: LibraryType) {
     switch (action.action) {
       case Action.MarkAsRead:
-        return this.readerService.markVolumeRead(seriesId, volume.id).pipe(
+      case Action.MarkAsReadWithSession:
+        const generateReadingSession = action.action === Action.MarkAsReadWithSession;
+        return this.readerService.markVolumeRead(seriesId, volume.id, generateReadingSession).pipe(
           tap(() => this.toastr.success(translate('toasts.mark-read'))),
           map(() => {
             const updated = {
@@ -484,7 +491,7 @@ export class ActionService {
       }
 
       case Action.Download:
-        this.downloadService.download('volume', volume, libraryId, seriesId);
+        this.downloadService.download(DownloadEntityType.Volume, volume, libraryId, seriesId);
         return of(this.fromAction(action, volume, 'none'));
 
       default:
@@ -500,7 +507,9 @@ export class ActionService {
     switch (action.action) {
 
       case Action.MarkAsRead:
-        return this.readerService.saveProgress(libraryId, seriesId, chapter.volumeId, chapter.id, chapter.pages).pipe(
+      case Action.MarkAsReadWithSession:
+        const generateReadingSession = action.action === Action.MarkAsReadWithSession;
+        return this.readerService.markChapterRead(seriesId, chapter.id, generateReadingSession).pipe(
           tap(() => this.toastr.success(translate('toasts.mark-read'))),
           map(() => {
             const updated = {
@@ -512,7 +521,7 @@ export class ActionService {
         );
 
       case Action.MarkAsUnread:
-        return this.readerService.saveProgress(libraryId, seriesId, chapter.volumeId, chapter.id, 9).pipe(
+        return this.readerService.saveProgress(libraryId, seriesId, chapter.volumeId, chapter.id, 0).pipe(
           tap(() => this.toastr.success(translate('toasts.mark-unread'))),
           map(() => {
             const updated = {
@@ -533,7 +542,7 @@ export class ActionService {
         );
 
       case Action.Download:
-        this.downloadService.download('chapter', chapter, libraryId, seriesId);
+        this.downloadService.download(DownloadEntityType.Chapter, chapter, libraryId, seriesId);
         return of(this.fromAction(action, chapter, 'none'));
 
       case Action.Edit:
@@ -624,7 +633,7 @@ export class ActionService {
         );
 
       case Action.Download:
-        this.downloadService.download('bookmark', [bookmark], 0, 0);
+        this.downloadService.download(DownloadEntityType.Bookmark, [bookmark], 0, 0);
         return of(this.fromAction(action, bookmark, 'none'));
 
       case Action.ViewSeries:
@@ -650,6 +659,10 @@ export class ActionService {
           map(() => this.fromAction(action, readingList, 'remove'))
         );
 
+      case Action.Download:
+        this.downloadService.download(DownloadEntityType.ReadingList, readingList, 0, 0);
+        return of(this.fromAction(action, readingList, 'none'));
+
       case Action.Edit:
         const ref = this.modalService.open(EditReadingListModalComponent, editModal());
         ref.componentInstance.readingList = readingList;
@@ -665,6 +678,16 @@ export class ActionService {
           tap(() => this.toastr.success(translate('toasts.reading-list-unpromoted'))),
           map(() => this.fromAction(action, {...readingList, promoted: false}, 'update'))
         );
+
+      case Action.ExportAsV1:
+        return this.downloadService.exportReadingList(readingList.id, readingList.title).pipe(
+          map(() => this.fromAction(action, readingList, 'none'))
+        );
+      case Action.ExportAsV2:
+        return this.downloadService.exportReadingList(readingList.id, readingList.title, true).pipe(
+          map(() => this.fromAction(action, readingList, 'none'))
+        );
+
       default:
         return of(this.fromAction(action, readingList, 'none'));
     }
@@ -700,6 +723,9 @@ export class ActionService {
           tap(() => this.toastr.success(translate('toasts.collections-unpromoted'))),
           map(() => this.fromAction(action, {...collection, promoted: false}, 'update'))
         );
+      case Action.Download:
+        this.downloadService.download(DownloadEntityType.Collection, collection, 0, 0);
+        return of(this.fromAction(action, collection, 'none'));
 
       default:
         return of(this.fromAction(action, collection, 'none'));
@@ -747,7 +773,7 @@ export class ActionService {
   handleClientDeviceAction(action: ActionItem<ClientDevice>, clientDevice: ClientDevice) {
     switch (action.action) {
       case Action.Delete:
-        return from(this.confirmService.confirm(translate('toasts.confirm-delete-annotations'))).pipe(
+        return from(this.confirmService.confirm(translate('toasts.confirm-delete-client-device'))).pipe(
           filter(confirmed => confirmed),
           switchMap(() => this.deviceService.deleteClientDevice(clientDevice.id)),
           map((success) => this.fromAction(action, clientDevice,  success ? 'remove' : 'none'))
@@ -803,7 +829,7 @@ export class ActionService {
       case Action.Delete:
         return from(this.confirmService.confirm(translate('toasts.confirm-delete-smart-filter'))).pipe(
           filter(confirmed => confirmed),
-          switchMap(() => this.collectionService.deleteTag(smartFilter.id)),
+          switchMap(() => this.filterService.deleteFilter(smartFilter.id)),
           tap(() => this.toastr.success(translate('toasts.smart-filter-deleted'))),
           map(() => this.fromAction(action, smartFilter, 'remove'))
         );
@@ -863,7 +889,9 @@ export class ActionService {
   handleBulkSeriesAction(action: ActionItem<any>, series: Series[]): Observable<ActionResult<Series[]>> {
     switch (action.action) {
       case Action.MarkAsRead:
-        return this.readerService.markMultipleSeriesRead(series.map(s => s.id)).pipe(
+      case Action.MarkAsReadWithSession:
+        const generateReadingSession = action.action === Action.MarkAsReadWithSession;
+        return this.readerService.markMultipleSeriesRead(series.map(s => s.id), generateReadingSession).pipe(
           tap(() => {
             series.forEach(s => s.pagesRead = s.pages);
             this.toastr.success(translate('toasts.mark-read'));
@@ -897,7 +925,7 @@ export class ActionService {
 
       case Action.AddToReadingList: {
         if (this.readingListModalRef != null) return EMPTY;
-        const rlRef = this.modalService.open(ListSelectModalComponent, addToModal()) as TypedModalRef<ListSelectModalComponent<ReadingList>>;
+        const rlRef = this.modalService.open(ListSelectModalComponent<ReadingList>, addToModal());
         this.readingListModalRef = rlRef;
 
         const bulkSeriesIds = series.map(s => s.id);
@@ -1024,7 +1052,7 @@ export class ActionService {
       }
 
       case Action.Download:
-        for (const s of series) { this.downloadService.download('series', s, s.libraryId, s.id); }
+        for (const s of series) { this.downloadService.download(DownloadEntityType.Series, s, s.libraryId, s.id); }
         return of(this.fromAction(action, series, 'none'));
 
       default:
@@ -1035,7 +1063,9 @@ export class ActionService {
   handleBulkVolumeChapterAction(action: ActionItem<any>, volumes: Volume[], chapters: Chapter[], seriesId: number, libraryId = 0): Observable<ActionResult<any[]>> {
     switch (action.action) {
       case Action.MarkAsRead:
-        return this.readerService.markMultipleRead(seriesId, volumes.map(v => v.id), chapters.map(c => c.id)).pipe(
+      case Action.MarkAsReadWithSession:
+        const generateReadingSession = action.action === Action.MarkAsReadWithSession;
+        return this.readerService.markMultipleRead(seriesId, volumes.map(v => v.id), chapters.map(c => c.id), generateReadingSession).pipe(
           tap(() => {
             volumes.forEach(v => {
               v.pagesRead = v.pages;
@@ -1163,7 +1193,7 @@ export class ActionService {
   handleBulkBookmarkAction(action: ActionItem<any>, bookmarks: PageBookmark[], seriesIds: number[]): Observable<ActionResult<PageBookmark[]>> {
     switch (action.action) {
       case Action.Download:
-        this.downloadService.download('bookmark', bookmarks, 0, 0);
+        this.downloadService.download(DownloadEntityType.Bookmark, bookmarks, 0, 0);
         return of(this.fromAction(action, bookmarks, 'none'));
 
       case Action.Delete:
@@ -1201,6 +1231,10 @@ export class ActionService {
           map(() => this.fromAction(action, collections, 'remove'))
         );
 
+      case Action.Download:
+        for (let c of collections) this.downloadService.download(DownloadEntityType.Collection, c, 0, 0);
+        return of(this.fromAction(action, collections, 'none'));
+
       default:
         return of(this.fromAction(action, collections, 'none'));
     }
@@ -1227,6 +1261,10 @@ export class ActionService {
           tap(() => this.toastr.success(translate('toasts.reading-lists-deleted'))),
           map(() => this.fromAction(action, readingLists, 'remove'))
         );
+
+      case Action.Download:
+        for (const rl of readingLists) { this.downloadService.download(DownloadEntityType.ReadingList, rl, 0, 0); }
+        return of(this.fromAction(action, readingLists, 'none'));
 
       default:
         return of(this.fromAction(action, readingLists, 'none'));

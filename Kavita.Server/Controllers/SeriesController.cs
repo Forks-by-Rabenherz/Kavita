@@ -21,6 +21,7 @@ using Kavita.Models.Entities.Enums;
 using Kavita.Models.Entities.MetadataMatching;
 using Kavita.Server.Attributes;
 using Kavita.Server.Extensions;
+using Kavita.Server.Helpers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
@@ -177,6 +178,8 @@ public class SeriesController(
 
         series.SortNameLocked = updateSeries.SortNameLocked;
         series.LocalizedNameLocked = updateSeries.LocalizedNameLocked;
+
+        ExternalMetadataIdHelper.SetExternalMetadataIds(series, updateSeries);
 
 
         var needsRefreshMetadata = false;
@@ -534,6 +537,7 @@ public class SeriesController(
     /// </summary>
     /// <param name="dto"></param>
     /// <returns></returns>
+    [KPlus]
     [HttpPost("match")]
     [Authorize(Policy = PolicyGroups.AdminPolicy)]
     public async Task<ActionResult<IList<ExternalSeriesMatchDto>>> MatchSeries(MatchSeriesDto dto)
@@ -556,7 +560,11 @@ public class SeriesController(
     /// </summary>
     /// <param name="match"></param>
     /// <param name="seriesId"></param>
+    /// <param name="aniListId"></param>
+    /// <param name="malId"></param>
+    /// <param name="cbrId"></param>
     /// <returns></returns>
+    [KPlus]
     [HttpPost("update-match")]
     [Authorize(Policy = PolicyGroups.AdminPolicy)]
     public ActionResult UpdateSeriesMatch([FromQuery] int seriesId, [FromQuery] int? aniListId, [FromQuery] long? malId, [FromQuery] int? cbrId)
@@ -572,6 +580,7 @@ public class SeriesController(
     /// <param name="seriesId"></param>
     /// <param name="dontMatch"></param>
     /// <returns></returns>
+    [KPlus]
     [HttpPost("dont-match")]
     [Authorize(Policy = PolicyGroups.AdminPolicy)]
     public async Task<ActionResult> UpdateDontMatch([FromQuery] int seriesId, [FromQuery] bool dontMatch)

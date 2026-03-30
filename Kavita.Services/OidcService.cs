@@ -184,6 +184,15 @@ public class OidcService(ILogger<OidcService> logger, UserManager<AppUser> userM
         await unitOfWork.CommitAsync(ct);
     }
 
+    public async Task ClearOidcIdForUser(int userId, CancellationToken ct = default)
+    {
+        var user = await unitOfWork.UserRepository.GetUserByIdAsync(userId, ct: ct);
+        if (user == null) return;
+
+        user.OidcId = null;
+        await unitOfWork.CommitAsync(ct);
+    }
+
     /// <summary>
     /// Tries to construct a new account from the OIDC Principal may fail if required conditions aren't met
     /// </summary>
@@ -468,6 +477,7 @@ public class OidcService(ILogger<OidcService> logger, UserManager<AppUser> userM
             var invitingUser = await unitOfWork.UserRepository.GetDefaultAdminUser();
             BackgroundJob.Enqueue(() => emailService.SendEmailChangeEmail(new ConfirmationEmailDto()
             {
+                LocaleUserId = user.Id,
                 EmailAddress = string.IsNullOrEmpty(user.Email) ? email : user.Email,
                 InstallId = BuildInfo.Version.ToString(),
                 InvitingUser = invitingUser.UserName,

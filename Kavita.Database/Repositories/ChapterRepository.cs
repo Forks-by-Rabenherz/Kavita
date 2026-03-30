@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using Kavita.API.Repositories;
+using Kavita.Common.Extensions;
 using Kavita.Database.Extensions;
 using Kavita.Models.Constants;
 using Kavita.Models.DTOs;
@@ -268,14 +269,14 @@ public class ChapterRepository(DataContext context, IMapper mapper) : IChapterRe
             .ToListAsync(ct);
     }
 
-    public async Task<long> GetFilesizeForChapterAsync(int chapterId, CancellationToken ct = default)
+    public async Task<long> GetFilesizeAsync(int chapterId, CancellationToken ct = default)
     {
         return await context.MangaFile
             .Where(c => c.ChapterId == chapterId)
             .SumAsync(c => c.Bytes, cancellationToken: ct);
     }
 
-    public async Task<Dictionary<int, long>> GetFilesizeForChaptersAsync(IList<int> chapterIds, CancellationToken ct = default)
+    public async Task<Dictionary<int, long>> GetFilesizesAsync(IList<int> chapterIds, CancellationToken ct = default)
     {
         return await chapterIds.BatchToDictionaryAsync(50, batch =>
             context.MangaFile
@@ -435,5 +436,50 @@ public class ChapterRepository(DataContext context, IMapper mapper) : IChapterRe
             .Where(chp => chp.Id == chapterId)
             .Select(chp => chp.Volume.SeriesId)
             .FirstOrDefaultAsync(ct);
+    }
+
+    public async Task<IList<Chapter>> GetChaptersByExternalIdsAsync(IList<string> comicVineIds, IList<long> metronIds, IList<int> libraryIds, CancellationToken ct = default)
+    {
+        if (comicVineIds.Count == 0 && metronIds.Count == 0) return [];
+
+        var query = context.Chapter
+            .Include(c => c.Volume)
+            .ThenInclude(v => v.Series)
+            .Where(c => libraryIds.Contains(c.Volume.Series.LibraryId));
+
+        if (comicVineIds.Count > 0 && metronIds.Count > 0)
+        {
+            query = query.Where(c =>
+                (c.ComicVineId != null && comicVineIds.Contains(c.ComicVineId)) ||
+                (c.MetronId > 0 && metronIds.Contains(c.MetronId)));
+        }
+        else if (comicVineIds.Count > 0)
+        {
+            query = query.Where(c => c.ComicVineId != null && comicVineIds.Contains(c.ComicVineId));
+        }
+        else
+        {
+            query = query.Where(c => c.MetronId > 0 && metronIds.Contains(c.MetronId));
+        }
+
+        return await query.ToListAsync(ct);
+    }
+
+    public async Task<IList<Chapter>> GetChaptersByAlternateSeriesAsync(IList<string> normalizedNames, IList<int> libraryIds, CancellationToken ct = default)
+    {
+        if (normalizedNames.Count == 0) return [];
+
+        // AlternateSeries is rare and not normalized in the DB, so fetch all non-empty ones and filter in-memory
+        var chapters = await context.Chapter
+            .Include(c => c.Volume)
+            .ThenInclude(v => v.Series)
+            .Where(c => libraryIds.Contains(c.Volume.Series.LibraryId))
+            .Where(c => c.AlternateSeries != null && c.AlternateSeries != string.Empty)
+            .ToListAsync(ct);
+
+        var normalizedSet = new HashSet<string>(normalizedNames);
+        return chapters
+            .Where(c => normalizedSet.Contains(c.AlternateSeries.ToNormalized()))
+            .ToList();
     }
 }

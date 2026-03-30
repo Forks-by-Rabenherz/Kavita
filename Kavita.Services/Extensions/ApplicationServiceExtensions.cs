@@ -4,6 +4,7 @@ using Kavita.API.Services.Helpers;
 using Kavita.API.Services.Metadata;
 using Kavita.API.Services.Plus;
 using Kavita.API.Services.Reading;
+using Kavita.API.Services.ReadingLists;
 using Kavita.API.Services.Scanner;
 using Kavita.API.Services.SignalR;
 using Kavita.Services.Helpers;
@@ -11,6 +12,7 @@ using Kavita.Services.HostedServices;
 using Kavita.Services.Metadata;
 using Kavita.Services.Plus;
 using Kavita.Services.Reading;
+using Kavita.Services.ReadingLists;
 using Kavita.Services.Scanner;
 using Kavita.Services.SignalR;
 using Microsoft.Extensions.DependencyInjection;
@@ -56,6 +58,10 @@ public static class ApplicationServiceExtensions
         services.AddScoped<IAnnotationService, AnnotationService>();
         services.AddScoped<IOpdsService, OpdsService>();
 
+        services.AddScoped<ICblExportService, CblExportService>();
+        services.AddScoped<ICblGithubService, CblGithubService>();
+        services.AddScoped<ICblImportService, CblImportService>();
+
         services.AddScoped<IScannerService, ScannerService>();
         services.AddScoped<IProcessSeries, ProcessSeries>();
         services.AddScoped<IMetadataService, MetadataService>();
@@ -93,6 +99,9 @@ public static class ApplicationServiceExtensions
 
         services.AddSingleton<IReadingSessionService, ReadingSessionService>();
         services.AddSingleton<IEntityNamingService, EntityNamingService>();
+        services.AddSingleton<ActiveUserTrackerService>(); // This is required for the below lines. It allows IHostedService.StopAsync() to be called on shutdown
+        services.AddSingleton<IActiveUserTrackerService>(sp => sp.GetRequiredService<ActiveUserTrackerService>());
+        services.AddHostedService(sp => sp.GetRequiredService<ActiveUserTrackerService>());
 
         services.AddHostedService<StartupTasksHostedService>();
     }

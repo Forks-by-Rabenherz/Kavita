@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using Kavita.API.Repositories;
+using Kavita.API.Services.Helpers;
 using Kavita.API.Services.Plus;
 using Kavita.API.Services.Reading;
 using Kavita.Common.Extensions;
@@ -541,14 +542,14 @@ public class SeriesRepository(DataContext context, IMapper mapper) : ISeriesRepo
         return seriesChapters;
     }
 
-    public async Task<long> GetFilesizeForSeriesAsync(int seriesId, CancellationToken ct = default)
+    public async Task<long> GetFilesizeAsync(int seriesId, CancellationToken ct = default)
     {
         return await context.Volume
             .Where(v => v.SeriesId == seriesId)
             .SumAsync(v => v.Chapters.Sum(c => c.Files.Sum(f => f.Bytes)), cancellationToken: ct);
     }
 
-    public async Task<Dictionary<int, long>> GetFilesizeForMultipleSeriesAsync(IList<int> seriesIds, CancellationToken ct = default)
+    public async Task<Dictionary<int, long>> GetFilesizesAsync(IList<int> seriesIds, CancellationToken ct = default)
     {
         return await seriesIds.BatchToDictionaryAsync(50, batch =>
             context.Volume
@@ -629,16 +630,15 @@ public class SeriesRepository(DataContext context, IMapper mapper) : ISeriesRepo
                 AltSeriesName = series.LocalizedName,
                 AniListId = series.ExternalSeriesMetadata.AniListId != 0
                     ? series.ExternalSeriesMetadata.AniListId
-                    : ScrobblingHelper.ExtractId<int?>(series.Metadata.WebLinks, ScrobblingHelper.AniListWeblinkWebsite),
+                    : WeblinkParser.GetAniListId(series.Metadata.WebLinks),
                 MalId = series.ExternalSeriesMetadata.MalId != 0
                     ? series.ExternalSeriesMetadata.MalId
-                    : ScrobblingHelper.ExtractId<long?>(series.Metadata.WebLinks, ScrobblingHelper.MalWeblinkWebsite),
+                    : WeblinkParser.GetMalId(series.Metadata.WebLinks),
                 CbrId = series.ExternalSeriesMetadata.CbrId,
                 GoogleBooksId = !string.IsNullOrEmpty(series.ExternalSeriesMetadata.GoogleBooksId)
                     ? series.ExternalSeriesMetadata.GoogleBooksId
-                    : ScrobblingHelper.ExtractId<string?>(series.Metadata.WebLinks, ScrobblingHelper.GoogleBooksWeblinkWebsite),
-                MangaDexId = ScrobblingHelper.ExtractId<string?>(series.Metadata.WebLinks,
-                    ScrobblingHelper.MangaDexWeblinkWebsite),
+                    : WeblinkParser.GetGoogleBooksId(series.Metadata.WebLinks),
+                MangaDexId = WeblinkParser.GetMangaDexId(series.Metadata.WebLinks),
                 VolumeCount = series.Volumes.Count,
                 ChapterCount = series.Volumes.SelectMany(v => v.Chapters).Count(c => !c.IsSpecial),
                 Year = series.Metadata.ReleaseYear
@@ -1407,7 +1407,7 @@ public class SeriesRepository(DataContext context, IMapper mapper) : ISeriesRepo
             .RestrictAgainstAgeRestriction(userRating)
             .AsSplitQuery()
             .AsNoTracking()
-            .ProjectTo<SeriesDto>(mapper.ConfigurationProvider)
+            .ProjectToWithProgress<Series, SeriesDto>(mapper.ConfigurationProvider, userId)
             .ToListAsync(ct);
     }
 
@@ -1552,6 +1552,25 @@ public class SeriesRepository(DataContext context, IMapper mapper) : ISeriesRepo
             .Where(s => normalizedNames.Contains(s.NormalizedName) ||
                         normalizedNames.Contains(s.NormalizedLocalizedName))
             .Where(s => libraryIds.Contains(s.LibraryId))
+            .RestrictAgainstAgeRestriction(userRating)
+            .Includes(includes)
+            .ToListAsync(ct);
+    }
+
+    public async Task<IEnumerable<Series>> GetAllSeriesByNameAsync(IList<string> normalizedNames,
+        int userId, IList<int>? libraryIds, SeriesIncludes includes = SeriesIncludes.None, CancellationToken ct = default)
+    {
+        var userLibraryIds = await context.Library.GetUserLibraries(userId).ToListAsync(ct);
+        if (libraryIds is { Count: > 0 })
+        {
+            userLibraryIds = userLibraryIds.Where(libraryIds.Contains).ToList();
+        }
+        var userRating = await context.AppUser.GetUserAgeRestriction(userId, ct: ct);
+
+        return await context.Series
+            .Where(s => normalizedNames.Contains(s.NormalizedName) ||
+                        normalizedNames.Contains(s.NormalizedLocalizedName))
+            .Where(s => userLibraryIds.Contains(s.LibraryId))
             .RestrictAgainstAgeRestriction(userRating)
             .Includes(includes)
             .ToListAsync(ct);
@@ -1845,23 +1864,23 @@ public class SeriesRepository(DataContext context, IMapper mapper) : ISeriesRepo
     {
         var libraryIds = context.Library.GetUserLibraries(userId);
         var usersSeriesIds = GetSeriesIdsForLibraryIds(libraryIds);
-        var userRating = await context.AppUser.GetUserAgeRestriction(userId);
+        var userRating = await context.AppUser.GetUserAgeRestriction(userId, ct: ct);
 
         return new RelatedSeriesDto()
         {
             SourceSeriesId = seriesId,
-            Adaptations = await GetRelatedSeriesQuery(seriesId, usersSeriesIds, RelationKind.Adaptation, userRating, ct),
-            Characters = await GetRelatedSeriesQuery(seriesId, usersSeriesIds, RelationKind.Character, userRating, ct),
-            Prequels = await GetRelatedSeriesQuery(seriesId, usersSeriesIds, RelationKind.Prequel, userRating, ct),
-            Sequels = await GetRelatedSeriesQuery(seriesId, usersSeriesIds, RelationKind.Sequel, userRating, ct),
-            Contains = await GetRelatedSeriesQuery(seriesId, usersSeriesIds, RelationKind.Contains, userRating, ct),
-            SideStories = await GetRelatedSeriesQuery(seriesId, usersSeriesIds, RelationKind.SideStory, userRating, ct),
-            SpinOffs = await GetRelatedSeriesQuery(seriesId, usersSeriesIds, RelationKind.SpinOff, userRating, ct),
-            Others = await GetRelatedSeriesQuery(seriesId, usersSeriesIds, RelationKind.Other, userRating, ct),
-            AlternativeSettings = await GetRelatedSeriesQuery(seriesId, usersSeriesIds, RelationKind.AlternativeSetting, userRating, ct),
-            AlternativeVersions = await GetRelatedSeriesQuery(seriesId, usersSeriesIds, RelationKind.AlternativeVersion, userRating, ct),
-            Doujinshis = await GetRelatedSeriesQuery(seriesId, usersSeriesIds, RelationKind.Doujinshi, userRating, ct),
-            Annuals = await GetRelatedSeriesQuery(seriesId, usersSeriesIds, RelationKind.Annual, userRating, ct),
+            Adaptations = await GetRelatedSeriesQuery(userId, seriesId, usersSeriesIds, RelationKind.Adaptation, userRating, ct),
+            Characters = await GetRelatedSeriesQuery(userId, seriesId, usersSeriesIds, RelationKind.Character, userRating, ct),
+            Prequels = await GetRelatedSeriesQuery(userId, seriesId, usersSeriesIds, RelationKind.Prequel, userRating, ct),
+            Sequels = await GetRelatedSeriesQuery(userId, seriesId, usersSeriesIds, RelationKind.Sequel, userRating, ct),
+            Contains = await GetRelatedSeriesQuery(userId, seriesId, usersSeriesIds, RelationKind.Contains, userRating, ct),
+            SideStories = await GetRelatedSeriesQuery(userId, seriesId, usersSeriesIds, RelationKind.SideStory, userRating, ct),
+            SpinOffs = await GetRelatedSeriesQuery(userId, seriesId, usersSeriesIds, RelationKind.SpinOff, userRating, ct),
+            Others = await GetRelatedSeriesQuery(userId, seriesId, usersSeriesIds, RelationKind.Other, userRating, ct),
+            AlternativeSettings = await GetRelatedSeriesQuery(userId, seriesId, usersSeriesIds, RelationKind.AlternativeSetting, userRating, ct),
+            AlternativeVersions = await GetRelatedSeriesQuery(userId, seriesId, usersSeriesIds, RelationKind.AlternativeVersion, userRating, ct),
+            Doujinshis = await GetRelatedSeriesQuery(userId, seriesId, usersSeriesIds, RelationKind.Doujinshi, userRating, ct),
+            Annuals = await GetRelatedSeriesQuery(userId, seriesId, usersSeriesIds, RelationKind.Annual, userRating, ct),
             Parent = await context.SeriesRelation
                 .Where(r => r.TargetSeriesId == seriesId
                             && usersSeriesIds.Contains(r.TargetSeriesId)
@@ -1872,9 +1891,9 @@ public class SeriesRepository(DataContext context, IMapper mapper) : ISeriesRepo
                 .RestrictAgainstAgeRestriction(userRating)
                 .AsSplitQuery()
                 .AsNoTracking()
-                .ProjectTo<SeriesDto>(mapper.ConfigurationProvider)
+                .ProjectToWithProgress<Series, SeriesDto>(mapper.ConfigurationProvider, userId)
                 .ToListAsync(ct),
-            Editions = await GetRelatedSeriesQuery(seriesId, usersSeriesIds, RelationKind.Edition, userRating, ct)
+            Editions = await GetRelatedSeriesQuery(userId, seriesId, usersSeriesIds, RelationKind.Edition, userRating, ct)
         };
     }
 
@@ -1885,7 +1904,7 @@ public class SeriesRepository(DataContext context, IMapper mapper) : ISeriesRepo
             .Select(s => s.Id);
     }
 
-    private async Task<IEnumerable<SeriesDto>> GetRelatedSeriesQuery(int seriesId, IEnumerable<int> usersSeriesIds,
+    private async Task<IEnumerable<SeriesDto>> GetRelatedSeriesQuery(int userId, int seriesId, IEnumerable<int> usersSeriesIds,
         RelationKind kind, AgeRestriction userRating, CancellationToken ct = default)
     {
         return await context.Series.SelectMany(s =>
@@ -1894,7 +1913,7 @@ public class SeriesRepository(DataContext context, IMapper mapper) : ISeriesRepo
             .RestrictAgainstAgeRestriction(userRating)
             .AsSplitQuery()
             .AsNoTracking()
-            .ProjectTo<SeriesDto>(mapper.ConfigurationProvider)
+            .ProjectToWithProgress<Series, SeriesDto>(mapper.ConfigurationProvider, userId)
             .ToListAsync(ct);
     }
 

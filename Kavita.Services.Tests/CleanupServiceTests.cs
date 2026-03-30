@@ -15,6 +15,7 @@ using Kavita.Models.DTOs.Filtering;
 using Kavita.Models.Entities;
 using Kavita.Models.Entities.Enums;
 using Kavita.Models.Entities.Progress;
+using Kavita.Models.Entities.ReadingLists;
 using Kavita.Models.Entities.User;
 using Kavita.Services.Builders;
 using Kavita.Services.Reading;
@@ -43,7 +44,7 @@ public class CleanupServiceTests(ITestOutputHelper outputHelper): AbstractDbTest
             new DirectoryService(Substitute.For<ILogger<DirectoryService>>(), new MockFileSystem()),
             Substitute.For<IScrobblingService>(), Substitute.For<IReadingSessionService>(),
             Substitute.For<IClientInfoAccessor>(), Substitute.For<ISeriesService>(),
-            Substitute.For<IEntityNamingService>(), Substitute.For<ILocalizationService>());
+            Substitute.For<IEntityNamingService>(), Substitute.For<ILocalizationService>(), Substitute.For<IBookService>());
 
         return Task.FromResult<(ILogger<CleanupService>, IEventHub, IReaderService)>((logger, messageHub, readerService));
     }

@@ -262,8 +262,8 @@ export class CardConfigFactory {
         if ([LibraryType.LightNovel || LibraryType.Book].includes(params.libraryType)) {
           return v.name;
         }
-        if (v.hasOwnProperty('chapters') && v.chapters.length > 0 && v.chapters[0].titleName) {
-          v.chapters[0].titleName
+        if (v.hasOwnProperty('chapters') && v.chapters.length === 1 && v.chapters[0].titleName) {
+          return v.chapters[0].titleName;
         }
 
         return v.name;
@@ -343,6 +343,7 @@ export class CardConfigFactory {
       actionableFunc: (c) => this.actionFactory.getCollectionTagActions(params?.shouldRenderAction),
       readFunc: null,
       clickFunc: (c) => this.router.navigate(['collections', c.id]),
+      downloadItemFunc: (c) => this.downloadService.getItemForEntity(c, true),
     };
 
     return this.mergeConfig(defaults, params?.overrides);
@@ -375,6 +376,7 @@ export class CardConfigFactory {
       actionableFunc: (r) => this.actionFactory.getReadingListActions(params?.shouldRenderAction),
       readFunc: null,
       clickFunc: (r) => this.router.navigate(['lists', r.id]),
+      downloadItemFunc: (r) => this.downloadService.getItemForEntity(r, true),
     };
 
     return this.mergeConfig(defaults, params?.overrides);

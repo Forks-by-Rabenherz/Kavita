@@ -536,11 +536,13 @@ UI/Web/.angular/
 BenchmarkDotNet.Artifacts
 .claude/
 Kavita.Server/config/*backup.zip
+CLAUDE.md
 
 
 Kavita.Services.Tests/Test Data/ImageService/**/*_output*.*
 Kavita.Services.Tests/Test Data/ImageService/**/*_baseline*
 Kavita.Services.Tests/Test Data/ImageService/**/*.html
 Kavita.Services.Tests/Test Data/ScannerService/ScanTests/**/*
+
 
 Kavita.Server/config/appsettings.*.json

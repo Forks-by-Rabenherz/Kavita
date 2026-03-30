@@ -11,10 +11,12 @@ using Kavita.API.Services;
 using Kavita.API.Services.Helpers;
 using Kavita.API.Services.Plus;
 using Kavita.API.Services.Reading;
+using Kavita.API.Services.ReadingLists;
 using Kavita.API.Services.Scanner;
 using Kavita.API.Services.SignalR;
 using Kavita.Common;
 using Kavita.Common.Extensions;
+using Kavita.Common.Helpers;
 using Kavita.Models.Builders;
 using Kavita.Models.DTOs.KavitaPlus.Metadata;
 using Kavita.Models.DTOs.SignalR;
@@ -149,6 +151,13 @@ public class ProcessSeries(
             {
                 series.LocalizedName = localizedSeries;
                 series.NormalizedLocalizedName = series.LocalizedName.ToNormalized();
+            }
+
+            // Check if there is a comicvineSeriesId on file
+            var comicVineSeriesIds = parsedInfos.Select(p => p.ComicVineSeriesId).Where(s => !string.IsNullOrEmpty(s)).Distinct().ToList();
+            if (comicVineSeriesIds.Count == 1)
+            {
+                series.ComicVineId =  comicVineSeriesIds[0];
             }
 
             await UpdateSeriesMetadata(databasePeople, settings, series, library);
@@ -348,6 +357,9 @@ public class ProcessSeries(
         if (!string.IsNullOrEmpty(firstChapter?.WebLinks) && library.InheritWebLinksFromFirstChapter)
         {
             series.Metadata.WebLinks = firstChapter.WebLinks;
+            series.AniListId = WeblinkParser.GetAniListId(series.Metadata.WebLinks) ?? 0;
+            series.MalId = WeblinkParser.GetMalId(series.Metadata.WebLinks) ?? 0;
+            series.ComicVineId = WeblinkParser.GetComicVineId(series.Metadata.WebLinks).Item1;
         }
 
         if (!string.IsNullOrEmpty(firstChapter?.SeriesGroup) && library.ManageCollections)
@@ -684,9 +696,9 @@ public class ProcessSeries(
             // Add files
             AddOrUpdateFileForChapter(chapter, info, args.ForceUpdate);
 
-            chapter.Number = Parser.MinNumberFromRange(info.Chapters).ToString(CultureInfo.InvariantCulture);
-            chapter.MinNumber = Parser.MinNumberFromRange(info.Chapters);
-            chapter.MaxNumber = Parser.MaxNumberFromRange(info.Chapters);
+            chapter.Number = info.LowestChapter.ToString(CultureInfo.InvariantCulture);
+            chapter.MinNumber = info.LowestChapter;
+            chapter.MaxNumber = info.HighestChapter;
             chapter.Range = chapter.GetNumberTitle();
 
             if (!chapter.SortOrderLocked)
@@ -699,6 +711,16 @@ public class ProcessSeries(
                 // If we have float based chapters, first scan can have the chapter formatted as Chapter 0.2 - .2 as the title is wrong.
                 chapter.Title = chapter.GetNumberTitle();
             }
+
+            // When setting TotalCount, we need to check against EndMarker and ComicInfo
+            var totalCount = ParsedCountHelper.GetTotalCount(info);
+            if (totalCount > 0)
+            {
+                chapter.TotalCount = totalCount.Value;
+            }
+
+            // This needs to check against both Number and Volume to calculate Count
+            chapter.Count = ParsedCountHelper.GetCalculatedCount(info);
 
             try
             {
@@ -716,6 +738,13 @@ public class ProcessSeries(
                 logger.LogError(ex, "There was some issue when updating chapter's metadata");
             }
 
+            // Try to patch in any External Metadata Ids we've seen during parsing
+            chapter.AniListId = info.AniListId ?? 0;
+            chapter.MalId = info.MalId ?? 0;
+            chapter.MangaBakaId = info.MangaBakaId ?? 0;
+            chapter.MetronId = info.MetronId ?? 0;
+            chapter.ComicVineId = info.ComicVineId;
+            chapter.HardcoverId = info.HardcoverId ?? 0;
         }
 
         RemoveChapters(args.Volume, args.ParsedInfos);
@@ -873,25 +902,12 @@ public class ProcessSeries(
         if (!string.IsNullOrEmpty(comicInfo.Web))
         {
             chapter.WebLinks = string.Join(",", comicInfo.Web.SplitBy(','));
-
-            // TODO: For each weblink, try to parse out some MetadataIds and store in the Chapter directly for matching (CBL)
-            // var aniListId = ScrobblingHelper.GetAniListId(chapter.WebLinks);
-            // var malId = ScrobblingHelper.GetMalId(chapter.WebLinks);
         }
 
         if (!chapter.ISBNLocked && !string.IsNullOrEmpty(comicInfo.Isbn))
         {
             chapter.ISBN = comicInfo.Isbn;
         }
-
-        if (comicInfo.Count > 0)
-        {
-            chapter.TotalCount = comicInfo.Count;
-        }
-
-        // This needs to check against both Number and Volume to calculate Count
-        chapter.Count = comicInfo.CalculatedCount();
-
 
         if (!chapter.ReleaseDateLocked && comicInfo.Year > 0)
         {
@@ -931,6 +947,8 @@ public class ProcessSeries(
 
         logger.LogTrace("[TIME] Kavita took {Time} ms to create/update Chapter: {File}", sw.ElapsedMilliseconds, chapter.Files.First().FileName);
     }
+
+
 
     private async Task UpdateChapterGenres(Chapter chapter, IEnumerable<string> genreNames)
     {

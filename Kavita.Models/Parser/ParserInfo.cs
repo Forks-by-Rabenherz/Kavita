@@ -3,6 +3,7 @@ using Kavita.Models.Entities.Enums;
 using Kavita.Models.Metadata;
 
 namespace Kavita.Models.Parser;
+#nullable enable
 
 /// <summary>
 /// This represents all parsed information from a single file
@@ -83,5 +84,55 @@ public class ParserInfo
     /// </summary>
     public ComicInfo? ComicInfo { get; set; }
 
+    /// <summary>
+    /// Extracted from Notes/Weblink fields, not explicitly part of spec
+    /// </summary>
+    public int? AniListId { get; set; }
+    /// <summary>
+    /// Extracted from Notes field, not explicitly part of spec
+    /// </summary>
+    public long? MalId { get; set; }
+    /// <summary>
+    /// Extracted from Notes field, not explicitly part of spec
+    /// </summary>
+    public int? HardcoverId { get; set; }
+    /// <summary>
+    /// Extracted from Notes field, not explicitly part of spec
+    /// </summary>
+    public long? MetronId { get; set; }
+    /// <summary>
+    /// Extracted from Notes field, not explicitly part of spec
+    /// </summary>
+    public string? ComicVineId { get; set; }
+    /// <summary>
+    /// If the ComicVine slug starts with 4050, it's a Volume/Series Id
+    /// </summary>
+    public string? ComicVineSeriesId { get; set; }
+    /// <summary>
+    /// Extracted from Notes field, not explicitly part of spec
+    /// </summary>
+    public long? MangaBakaId { get; set; }
+    /// <summary>
+    /// Has an explicit "End" marker like (완결) which tells Kavita to use that as the Count, assuming no Count defined in ComicInfo.
+    /// </summary>
+    public bool HasEndMarker { get; set; }
 
+
+    // Transformed logic
+    /// <summary>
+    /// Highest Volume from ComicInfo then Parsed
+    /// </summary>
+    public float HighestVolume { get; set; }
+    /// <summary>
+    /// Lowest Volume from ComicInfo then Parsed
+    /// </summary>
+    public float LowestVolume { get; set; }
+    /// <summary>
+    /// Highest Chapter from ComicInfo then Parsed
+    /// </summary>
+    public float HighestChapter { get; set; }
+    /// <summary>
+    /// Lowest Chapter from ComicInfo then Parsed
+    /// </summary>
+    public float LowestChapter { get; set; }
 }

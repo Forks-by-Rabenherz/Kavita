@@ -134,7 +134,7 @@ export class DashboardComponent {
       }
     });
 
-    this.licenseService.hasValidLicense()
+    this.licenseService.hasAnyLicense()
       .pipe(
         filter((hasLic: boolean) => hasLic),
         switchMap(_ => this.scrobblingService.hasTokenExpired(ScrobbleProvider.AniList)),
@@ -142,7 +142,6 @@ export class DashboardComponent {
       if (hasExpired) {
         this.toastr.error(translate('toasts.anilist-token-expired'));
       }
-      this.cdRef.markForCheck();
     });
   }
 
@@ -303,7 +302,7 @@ export class DashboardComponent {
       filter.statements.push({field: FilterField.ReadProgress, comparison: FilterComparison.GreaterThan, value: '0'});
       filter.statements.push({field: FilterField.ReadProgress, comparison: FilterComparison.NotEqual, value: '100'});
       if (filter.sortOptions) {
-        filter.sortOptions.sortField = SortField.LastChapterAdded;
+        filter.sortOptions.sortField = SortField.ReadProgress;
         filter.sortOptions.isAscending = false;
       }
       this.filterUtilityService.applyFilterWithParams(['all-series'], filter, params).subscribe();

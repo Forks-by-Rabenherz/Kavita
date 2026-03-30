@@ -26,7 +26,8 @@ import {ImageService} from "../../_services/image.service";
 import {UploadService} from "../../_services/upload.service";
 import {MetadataService} from "../../_services/metadata.service";
 import {ActionService} from "../../_services/action.service";
-import {DownloadService} from "../../shared/_services/download.service";
+import {DownloadService} from '../../shared/_services/download.service';
+import {DownloadEntityType} from '../../shared/_models/download-queue-item';
 import {SettingItemComponent} from "../../settings/_components/setting-item/setting-item.component";
 import {TypeaheadComponent} from "../../typeahead/_components/typeahead.component";
 import {concat, forkJoin, Observable, of, tap} from "rxjs";
@@ -50,16 +51,12 @@ import {ActionItem} from "../../_models/actionables/action-item";
 import {Action} from "../../_models/actionables/action";
 import {ActionFactoryService} from "../../_services/action-factory.service";
 import {modalDeleted, modalSaved} from "../../_models/modal/modal-result";
+import {Tabs} from "../../_models/tabs";
+import {TabTitlePipe} from "../../_pipes/tab-title.pipe";
+import {
+  EditExternalMetadataFormComponent
+} from "../../shared/_components/edit-external-metadata-form/edit-external-metadata-form.component";
 
-enum TabID {
-  General = 'general-tab',
-  CoverImage = 'cover-image-tab',
-  Info = 'info-tab',
-  People = 'people-tab',
-  Tasks = 'tasks-tab',
-  Tags = 'tags-tab',
-  Weblinks = 'weblinks-tab', // TODO: Weblinks are not implemented
-}
 
 const blackList = [Action.Edit, Action.IncognitoRead, Action.AddToReadingList];
 
@@ -89,6 +86,8 @@ const blackList = [Action.Edit, Action.IncognitoRead, Action.AddToReadingList];
     ImageComponent,
     SafeHtmlPipe,
     ReadTimePipe,
+    TabTitlePipe,
+    EditExternalMetadataFormComponent,
   ],
   templateUrl: './edit-chapter-modal.component.html',
   styleUrl: './edit-chapter-modal.component.scss',
@@ -115,7 +114,7 @@ export class EditChapterModalComponent implements OnInit {
   @Input({required: true}) libraryId!: number;
   @Input({required: true}) seriesId!: number;
 
-  activeId = TabID.General;
+  activeId = Tabs.General;
   editForm: FormGroup = new FormGroup({});
   selectedCover: string = '';
   coverImageReset = false;
@@ -146,7 +145,7 @@ export class EditChapterModalComponent implements OnInit {
   constructor() {
     effect(() => {
       if (!this.accountService.hasAdminRole()) {
-        this.activeId = TabID.Info;
+        this.activeId = Tabs.Info;
         this.cdRef.markForCheck();
       }
     });
@@ -232,7 +231,7 @@ export class EditChapterModalComponent implements OnInit {
   }
 
   save() {
-    const model = this.editForm.value;
+    const model = this.editForm.getRawValue();
     const selectedIndex = this.editForm.get('coverImageIndex')?.value || 0;
 
     // Patch in data from the model that is not typeahead (as those are updated during setting)
@@ -247,15 +246,16 @@ export class EditChapterModalComponent implements OnInit {
     this.chapter.titleName = model.titleName;
     this.chapter.summary = model.summary;
     this.chapter.isbn = model.isbn;
+    this.chapter.aniListId = model.aniListId;
+    this.chapter.comicVineId = model.comicVineId;
+    this.chapter.malId = model.malId;
+    this.chapter.hardcoverId = model.hardcoverId;
+    this.chapter.metronId = model.metronId;
 
 
     const apis = [
       this.chapterService.updateChapter(this.chapter)
     ];
-
-    // We only need to call updateSeries if we changed name, sort name, or localized name or reset a cover image
-    const needsReload = this.editForm.get('titleName')?.dirty || this.editForm.get('sortOrder')?.dirty;
-
 
     if (selectedIndex > 0 || this.coverImageReset) {
       apis.push(this.uploadService.updateChapterCoverImage(this.chapter.id, this.selectedCover, !this.coverImageReset));
@@ -296,7 +296,7 @@ export class EditChapterModalComponent implements OnInit {
         });
         break;
       case Action.Download:
-        this.downloadService.download('chapter', this.chapter, this.libraryId, this.seriesId);
+        this.downloadService.download(DownloadEntityType.Chapter, this.chapter, this.libraryId, this.seriesId);
         break;
     }
   }
@@ -507,7 +507,7 @@ export class EditChapterModalComponent implements OnInit {
     return this.peopleSettings[role];
   }
 
-  protected readonly TabID = TabID;
+  protected readonly Tabs = Tabs;
   protected readonly Action = Action;
   protected readonly PersonRole = PersonRole;
   protected readonly MangaFormat = MangaFormat;

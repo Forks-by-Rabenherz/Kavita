@@ -7,6 +7,7 @@ using Kavita.Models.DTOs.Person;
 using Kavita.Models.DTOs.ReadingLists;
 using Kavita.Models.Entities;
 using Kavita.Models.Entities.Enums;
+using Kavita.Models.Entities.ReadingLists;
 
 namespace Kavita.API.Repositories;
 
@@ -52,4 +53,6 @@ public interface IReadingListRepository
     Task<bool> AnyUserReadingProgressAsync(int readingListId, int userId, CancellationToken ct = default);
     Task<ReadingListItemDto?> GetContinueReadingPoint(int readingListId, int userId, CancellationToken ct = default);
     Task<int> GetReadingListItemCountAsync(int readingListId, int userId, CancellationToken ct = default);
+    Task<long> GetFilesizeAsync(int readingListId, int userId, CancellationToken ct = default);
+    Task<Dictionary<int, long>> GetFilesizesAsync(IList<int> readingListIds, int userId, CancellationToken ct = default);
 }

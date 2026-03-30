@@ -1,4 +1,5 @@
 import {DOCUMENT, Location, NgClass, NgStyle, NgTemplateOutlet} from '@angular/common';
+import {DownloadEntityType} from '../../../shared/_models/download-queue-item';
 import {
   AfterViewInit,
   ChangeDetectionStrategy,
@@ -30,7 +31,7 @@ import {
   NgbTooltip
 } from '@ng-bootstrap/ng-bootstrap';
 import {ToastrService} from 'ngx-toastr';
-import {catchError, debounceTime, of, ReplaySubject, tap} from 'rxjs';
+import {catchError, debounceTime, EMPTY, of, ReplaySubject, tap} from 'rxjs';
 import {BulkSelectionService} from 'src/app/cards/bulk-selection.service';
 import {EditSeriesModalComponent} from 'src/app/cards/_modals/edit-series-modal/edit-series-modal.component';
 import {UtilityService} from 'src/app/shared/_services/utility.service';
@@ -113,21 +114,15 @@ import {EntityCardComponent} from "../../../cards/entity-card/entity-card.compon
 import {ModalResult} from "../../../_models/modal/modal-result";
 import {patchEntitySignal, patchSignalArray} from "../../../../libs/patch";
 import {ModalService} from "../../../_services/modal.service";
-import {getResolvedData} from "../../../../libs/route-util";
+import {getResolvedData, getWritableResolvedData} from "../../../../libs/route-util";
 import {ExternalSeries} from "../../../_models/series-detail/external-series";
-
-
-enum TabID {
-  Related = 'related-tab',
-  Specials = 'specials-tab',
-  Storyline = 'storyline-tab',
-  Volumes = 'volume-tab',
-  Chapters = 'chapter-tab',
-  Recommendations = 'recommendations-tab',
-  Reviews = 'reviews-tab',
-  Details = 'details-tab',
-  Annotations = 'annotations-tab'
-}
+import {Tabs} from "../../../_models/tabs";
+import {TabTitlePipe} from "../../../_pipes/tab-title.pipe";
+import {EntityTitleService} from "../../../_services/entity-title.service";
+import {ReadingHistoryItem} from "src/app/_models/stats/reading-history-item";
+import {StatisticsService} from "src/app/_services/statistics.service";
+import {Pagination} from "src/app/_models/pagination";
+import {ReadingHistoryViewerComponent} from "src/app/shared/reading-history-viewer/reading-history-viewer.component";
 
 interface StoryLineItem {
   chapter?: ChapterCardEntity;
@@ -147,10 +142,11 @@ interface StoryLineItem {
     TranslocoDirective, NgTemplateOutlet, NextExpectedCardComponent,
     NgClass, DetailsTabComponent, DefaultValuePipe, ExternalRatingComponent, ReadMoreComponent, RouterLink, BadgeExpanderComponent,
     PublicationStatusPipe, MetadataDetailRowComponent, DownloadButtonComponent, RelatedTabComponent, CoverImageComponent, ReviewsComponent,
-    AnnotationsTabComponent, ReadingProgressStatusPipePipe, ReadingProgressIconPipePipe, EntityCardComponent]
+    AnnotationsTabComponent, ReadingProgressStatusPipePipe, ReadingProgressIconPipePipe, EntityCardComponent, TabTitlePipe, ReadingHistoryViewerComponent]
 })
 class SeriesDetailComponent implements OnInit, AfterViewInit {
 
+  protected readonly DownloadEntityType = DownloadEntityType;
   private readonly destroyRef = inject(DestroyRef);
   private readonly route = inject(ActivatedRoute);
   private readonly seriesService = inject(SeriesService);
@@ -180,6 +176,8 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
   private readonly location = inject(Location);
   private readonly document = inject(DOCUMENT);
   protected readonly breakpointService = inject(BreakpointService);
+  private readonly entityTitleService = inject(EntityTitleService);
+  private readonly statisticsService = inject(StatisticsService);
 
   readonly scrollingBlock = viewChild<ElementRef<HTMLDivElement>>('scrollingBlock');
 
@@ -188,7 +186,7 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
   libraryId = input(0, {transform: numberAttribute });
   /** This will be {id,type,name} only for non-admin users */
   library = getResolvedData(this.route, 'library');
-  series = getResolvedData(this.route, 'series');
+  series = getWritableResolvedData(this.route, 'series');
 
   volumes = signal<Volume[]>([]);
   volumeEntities = computed(() => this.volumes().map(v => CardEntityFactory.volume(v, this.seriesId(), this.libraryId())));
@@ -233,13 +231,17 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
     return items;
   });
 
+  protected readingHistory = signal<ReadingHistoryItem[]>([]);
+  protected hasReadingHistory = computed(() => this.readingHistory().length > 0);
+  protected readingHistoryPagination = signal<Pagination | null>(null);
+  protected isLoadingReadingHistory = signal(false);
+  protected readingHistoryCurrentPage = signal(1);
 
   isAdmin = computed(() => {
     return this.accountService.hasAdminRole();
   });
 
-  activeTabId = TabID.Storyline;
-  downloadInProgress: boolean = false;
+  activeTabId = Tabs.Storyline;
   mobileSeriesImgBackground = this.themeService.getCssVariable('--mobile-series-img-background');
 
   isLoading = signal<boolean>(true);
@@ -248,7 +250,7 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
 
   libraryAllowsScrobbling  = signal<boolean>(false);
   isScrobbling = signal<boolean>(true);
-  showScrobbleControls = computed(() => this.licenseService.hasValidLicenseSignal() && this.libraryAllowsScrobbling());
+  showScrobbleControls = computed(() => this.licenseService.hasValidLicense() && this.libraryAllowsScrobbling());
 
   currentlyReadingChapter = signal<Chapter | null>(null);
   continueReadingTitle = computed(() => {
@@ -324,7 +326,7 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
   unreadCount = signal(0);
   totalCount = signal(0);
   seriesActions = computed(() => {
-    const hasLicense = this.licenseService.hasValidLicenseSignal();
+    const hasLicense = this.licenseService.hasValidLicense();
     let actions = this.actionFactoryService.getSeriesActions()
       .filter(action => action.action !== Action.Edit);
     if (!hasLicense) {
@@ -357,7 +359,7 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
 
 
   seriesCoverImage = computed(() => this.imageService.getSeriesCoverImage(this.seriesId()));
-  chapterTabName = computed(() => this.utilityService.formatChapterName(this.libraryType()));
+  chapterTabName = computed(() => this.entityTitleService.formatChapterName(this.libraryType(), true));
   nextExpectedChapter = signal<NextExpectedChapter | null>(null);
   loadPageSource = new ReplaySubject<boolean>(1);
   loadPage$ = this.loadPageSource.asObservable();
@@ -409,7 +411,7 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
   });
 
   trackStoryLineIdentity = (index: number, item: StoryLineItem) => item.isChapter ? `${item.chapter!.data.id}_ch_storyline` : `${item.volume!.data.id}_vol_storyline`;
-  
+
   /**
    * Related Series. Sorted by backend
    */
@@ -445,8 +447,8 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
 
     this.bulkSelectionService.registerResolver(() => {
       // Tab-dependent chapter array
-      let chapterArray = this.activeTabId === TabID.Chapters ? this.chapters() : this.storylineChapters();
-      const offset = this.activeTabId === TabID.Storyline ? this.volumes().length : 0;
+      let chapterArray = this.activeTabId === Tabs.Chapters ? this.chapters() : this.storylineChapters();
+      const offset = this.activeTabId === Tabs.Storyline ? this.volumes().length : 0;
 
       const volIndices = this.bulkSelectionService.getSelectedCardsForSource('volume');
       const chIndices = this.bulkSelectionService.getSelectedCardsForSource('chapter');
@@ -527,8 +529,8 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
 
 
     this.route.fragment.pipe(tap(frag => {
-      if (frag !== null && this.activeTabId !== (frag as TabID)) {
-        this.activeTabId = frag as TabID;
+      if (frag !== null && this.activeTabId !== (frag as Tabs)) {
+        this.activeTabId = frag as Tabs;
         this.updateUrl(this.activeTabId);
         this.cdRef.markForCheck();
       }
@@ -544,7 +546,7 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
     this.cdRef.markForCheck();
   }
 
-  updateUrl(activeTab: TabID) {
+  updateUrl(activeTab: Tabs) {
     const tokens = this.location.path().split('#');
     const newUrl = `${tokens[0]}#${activeTab}`;
     this.location.replaceState(newUrl)
@@ -561,20 +563,21 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
         this.router.navigate(['library', this.libraryId()]);
         break;
       case 'reload':
-        this.loadSeries(this.seriesId(), true);
+        this.loadPageSource.next(true);
         break;
       case 'none':
-        if (result.action === Action.Download) {
-          if (this.downloadInProgress) return;
-          this.downloadInProgress = true;
-          this.cdRef.markForCheck();
-        }
         break;
     }
   }
 
 
   loadSeries(seriesId: number, loadExternal: boolean = false) {
+    this.seriesService.getSeries(seriesId).subscribe(series => {
+      this.series.set(series);
+    });
+
+    this.loadReadingHistory();
+
     this.seriesService.getMetadata(seriesId).subscribe(metadata => {
       this.seriesMetadata.set({...metadata});
 
@@ -618,11 +621,6 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
       this.loadPlusMetadata(this.seriesId(), this.library().type);
     }
 
-
-
-
-
-
     this.seriesService.getSeriesDetail(this.seriesId()).pipe(catchError(_ => {
       this.router.navigateByUrl('/home');
       return of(null);
@@ -642,28 +640,28 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
 
       if (!this.router.url.includes('#')) {
         this.updateSelectedTab();
-      } else if (this.activeTabId != TabID.Storyline) {
+      } else if (this.activeTabId != Tabs.Storyline) {
         // Validate that the tab we are selected is still there (in case this comes from a messageHub)
         switch (this.activeTabId) {
-          case TabID.Related:
+          case Tabs.Related:
             if (!this.hasRelations()) this.updateSelectedTab();
             break;
-          case TabID.Specials:
+          case Tabs.Specials:
             if (!this.hasSpecials()) this.updateSelectedTab();
             break;
-          case TabID.Volumes:
+          case Tabs.Volumes:
             if (this.volumes().length === 0) this.updateSelectedTab();
             break;
-          case TabID.Chapters:
+          case Tabs.Chapters:
             if (this.chapters().length === 0) this.updateSelectedTab();
             break;
-          case TabID.Recommendations:
+          case Tabs.Recommendations:
             if (!this.hasRecommendations()) this.updateSelectedTab();
             break;
-          case TabID.Reviews:
+          case Tabs.Reviews:
             if (this.reviews().length === 0) this.updateSelectedTab();
             break;
-          case TabID.Details:
+          case Tabs.Details:
             break;
         }
       }
@@ -672,6 +670,7 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
     });
 
   }
+
   private loadRelatedSeries(seriesId: number) {
     this.seriesService.getRelatedForSeries(seriesId).subscribe((relations: RelatedSeries) => {
       this.relations.set([
@@ -727,6 +726,22 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
     return {series, relation} as RelatedSeriesPair;
   }
 
+  loadReadingHistory(page: number = 1) {
+    this.isLoadingReadingHistory.set(true);
+
+    this.statisticsService.getReadingHistoryForSeries(this.seriesId(), page).pipe(
+      tap(result => {
+        this.readingHistory.set(result.result);
+        this.readingHistoryPagination.set(result.pagination);
+        this.readingHistoryCurrentPage.set(page);
+        this.isLoadingReadingHistory.set(false);
+      }),
+      catchError(() => {
+        this.isLoadingReadingHistory.set(false);
+        return EMPTY;
+      }),
+    ).subscribe();
+  }
 
 
   /**
@@ -741,12 +756,12 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
       if (this.volumes().length === 0) {
         if (this.specials().length === 0 && this.storylineChapters().length > 0) {
           // NOTE: This is an edge case caused by bad parsing of pdf files. Once the new pdf parser is in place, this should be removed
-          this.activeTabId = TabID.Storyline;
+          this.activeTabId = Tabs.Storyline;
         } else {
-          this.activeTabId = TabID.Specials;
+          this.activeTabId = Tabs.Specials;
         }
       } else {
-        this.activeTabId = TabID.Volumes;
+        this.activeTabId = Tabs.Volumes;
       }
       this.updateUrl(this.activeTabId);
       this.cdRef.markForCheck();
@@ -754,20 +769,21 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
     }
 
     if (this.volumes().length === 0 && this.chapters().length === 0 && this.specials().length > 0) {
-      this.activeTabId = TabID.Specials;
+      this.activeTabId = Tabs.Specials;
     } else {
       if (libType == LibraryType.Comic || libType == LibraryType.ComicVine) {
         if (this.chapters().length === 0) {
-          if (this.specials().length > 0) {
-            this.activeTabId = TabID.Specials;
-          } else {
-            this.activeTabId = TabID.Volumes;
+
+          if (this.volumes().length > 0) {
+            this.activeTabId = Tabs.Volumes;
+          } else if (this.specials().length > 0) {
+            this.activeTabId = Tabs.Specials;
           }
         } else {
-          this.activeTabId = TabID.Chapters;
+          this.activeTabId = Tabs.Chapters;
         }
       } else {
-        this.activeTabId = TabID.Storyline;
+        this.activeTabId = Tabs.Storyline;
       }
     }
 
@@ -881,7 +897,7 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
   }
 
   switchTabsToDetail() {
-    this.activeTabId = TabID.Details;
+    this.activeTabId = Tabs.Details;
     this.cdRef.markForCheck();
 
     setTimeout(() => {
@@ -896,14 +912,16 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
     patchEntitySignal(this.chapters, c);
     patchEntitySignal(this.specials, c);
     patchEntitySignal(this.storylineChapters, c);
+    this.setContinuePoint();
   }
 
   updateVolume(c: Volume) {
     patchEntitySignal(this.volumes, c);
+    this.setContinuePoint();
   }
 
   protected readonly LibraryType = LibraryType;
-  protected readonly TabID = TabID;
+  protected readonly Tabs = Tabs;
   protected readonly LooseLeafOrSpecialNumber = LooseLeafOrDefaultNumber;
   protected readonly SpecialVolumeNumber = SpecialVolumeNumber;
   protected readonly SettingsTabId = SettingsTabId;

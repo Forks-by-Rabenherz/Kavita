@@ -52,7 +52,7 @@ public class AccountController(UserManager<AppUser> userManager,
     IEmailService emailService, IEventHub eventHub,
     ILocalizationService localizationService,
     IAuthenticationSchemeProvider authenticationSchemeProvider,
-    IAuthKeyService authKeyService) : BaseApiController
+    IAuthKeyService authKeyService, IOidcService oidcService) : BaseApiController
 {
     // Hardcoded to avoid localization multiple enumeration: https://github.com/Kareadita/Kavita/issues/2829
     private const string BadCredentialsMessage = "Your credentials are not correct";
@@ -69,6 +69,25 @@ public class AccountController(UserManager<AppUser> userManager,
     {
         var oidcScheme = await authenticationSchemeProvider.GetSchemeAsync(IdentityServiceExtensions.OpenIdConnect);
         return Ok(oidcScheme != null && HttpContext.Request.Cookies.ContainsKey(OidcService.CookieName));
+    }
+
+    /// <summary>
+    /// Remove the OIDC link for the authenticated user. This action will also remove the authentication cookie.
+    /// The caller should take note and redirect to login if no other authentication is currently present (I.e. JWT)
+    /// </summary>
+    /// <returns></returns>
+    [HttpPost("clear-oidc-link")]
+    public async Task<IActionResult> ClearOidcLink()
+    {
+        await oidcService.ClearOidcIdForUser(UserId, HttpContext.RequestAborted);
+
+        // OIDC is no longer connected, remove cookie
+        if (HttpContext.Request.Cookies.ContainsKey(OidcService.CookieName))
+        {
+            HttpContext.Response.Cookies.Delete(OidcService.CookieName);
+        }
+
+        return Ok();
     }
 
     /// <summary>
@@ -441,6 +460,7 @@ public class AccountController(UserManager<AppUser> userManager,
                 BackgroundJob.Enqueue(() => emailService.SendEmailChangeEmail(new ConfirmationEmailDto()
                 {
                     EmailAddress = string.IsNullOrEmpty(user.Email) ? dto.Email : user.Email,
+                    LocaleUserId = user.Id,
                     InstallId = BuildInfo.Version.ToString(),
                     InvitingUser = invitingUser,
                     ServerConfirmationLink = emailLink
@@ -764,7 +784,7 @@ public class AccountController(UserManager<AppUser> userManager,
             var settings = await unitOfWork.SettingsRepository.GetSettingsDtoAsync();
             if (!emailService.IsValidEmail(dto.Email) || !settings.IsEmailSetup())
             {
-                logger.LogInformation("[Invite User] {Email} doesn't appear to be an email or email is not setup", dto.Email.Replace(Environment.NewLine, string.Empty));
+                logger.LogInformation("[Invite User] {Email} doesn't appear to be an email or email is not setup", dto.Email.Sanitize());
                 return Ok(new InviteUserResponse
                 {
                     EmailLink = emailLink,
@@ -776,6 +796,7 @@ public class AccountController(UserManager<AppUser> userManager,
             BackgroundJob.Enqueue(() => emailService.SendInviteEmail(new ConfirmationEmailDto()
             {
                 EmailAddress = dto.Email,
+                LocaleUserId = adminUser.Id, // Use the admin's locale for the invite to server
                 InvitingUser = adminUser.UserName,
                 ServerConfirmationLink = emailLink
             }));
@@ -982,6 +1003,7 @@ public class AccountController(UserManager<AppUser> userManager,
         var installId = (await unitOfWork.SettingsRepository.GetSettingAsync(ServerSettingKey.InstallId)).Value;
         BackgroundJob.Enqueue(() => emailService.SendForgotPasswordEmail(new PasswordResetEmailDto()
         {
+            EmailUserId = user.Id,
             EmailAddress = user.Email,
             ServerConfirmationLink = emailLink,
             InstallId = installId
@@ -1078,6 +1100,7 @@ public class AccountController(UserManager<AppUser> userManager,
 
         BackgroundJob.Enqueue(() => emailService.SendInviteEmail(new ConfirmationEmailDto()
         {
+            LocaleUserId = user.Id,
             EmailAddress = user.Email!,
             InvitingUser = Username!,
             ServerConfirmationLink = emailLink,
@@ -1113,10 +1136,10 @@ public class AccountController(UserManager<AppUser> userManager,
     /// </summary>
     /// <returns></returns>
     [HttpGet("opds-url")]
-    public async Task<ActionResult<string>> GetOpdsUrl()
+    public async Task<ActionResult<string>> GetOpdsUrl([FromQuery] string? authKeyName = null)
     {
-        var user = await unitOfWork.UserRepository.GetUserByIdAsync(UserId);
         var serverSettings = await unitOfWork.SettingsRepository.GetSettingsDtoAsync();
+
         var origin = HttpContext.Request.Scheme + "://" + HttpContext.Request.Host.Value;
         if (!string.IsNullOrEmpty(serverSettings.HostName)) origin = serverSettings.HostName;
 
@@ -1136,10 +1159,14 @@ public class AccountController(UserManager<AppUser> userManager,
             }
         }
 
+        authKeyName ??= AuthKeyHelper.OpdsKeyName;
         var opdsAuthKey = (await unitOfWork.UserRepository.GetAuthKeysForUserId(UserId))
-            .Where(k => k is {Name: AuthKeyHelper.OpdsKeyName, Provider: AuthKeyProvider.System})
+            .Where(k => k.Name == authKeyName)
             .Select(k => k.Key)
             .FirstOrDefault();
+
+        if (opdsAuthKey == null)
+            return NotFound();
 
         return Ok(origin + "/" + baseUrl + "api/opds/" + opdsAuthKey);
     }

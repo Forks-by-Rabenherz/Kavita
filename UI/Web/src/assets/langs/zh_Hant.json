@@ -51,14 +51,13 @@
         "no-data": "{{common.no-data}}",
         "volume-and-chapter-num": "第{{v}}卷 第{{n}}章",
         "volume-num": "{{num}} 卷",
-        "chapter-num": "章節 {{num}}",
+        "chapter-num": "{{entity-title.chapter-num}}",
         "rating": "評分{{r}}",
         "not-applicable": "不適用",
         "processed": "處理",
         "not-processed": "未處理",
         "special": "{{entity-title.special}}",
         "scrobbling-disabled": "你的帳戶設定中已停用Scrobbling。",
-        "generate-scrobble-events": "回填事件",
         "token-expired": "您的 AniList 授權憑證已過期！在您於帳戶頁面更新之前，追蹤事件將無法處理。",
         "select-all-label": "全選",
         "delete-selected-label": "刪除所選項目"
@@ -175,8 +174,6 @@
         "active-theme": "活動",
         "updated-toastr": "網站預設值已更新為{{name}}",
         "delete": "{{common.delete}}",
-        "drag-n-drop": "{{cover-image-chooser.drag-n-drop}}",
-        "upload": "{{cover-image-chooser.upload}}",
         "upload-continued": "一個 CSS 檔案",
         "preview-default": "首先選擇一個主題",
         "preview-default-admin": "首先選擇一個主題，或手動上傳一個",
@@ -396,10 +393,10 @@
     },
     "relationship-pipe": {
         "adaptation": "改編",
-        "alternative-setting": "架空世界／平行設定",
-        "alternative-version": "不同版本／IF線",
-        "character": "客串角色",
-        "contains": "包含",
+        "alternative-setting": "同世界觀",
+        "alternative-version": "IF線",
+        "character": "角色連動",
+        "contains": "收錄",
         "doujinshi": "同人",
         "other": "其他",
         "prequel": "前傳",
@@ -408,7 +405,8 @@
         "spin-off": "衍伸作",
         "parent": "主系列",
         "edition": "特別版",
-        "annual": "年度特刊"
+        "annual": "年度特刊",
+        "cameo": "角色客串"
     },
     "publication-status-pipe": {
         "ongoing": "連載中",
@@ -427,7 +425,6 @@
         "penciller": "草稿師",
         "publisher": "出版社",
         "writer": "作者",
-        "other": "其他",
         "team": "{{filter-field-pipe.team}}",
         "location": "{{filter-field-pipe.location}}",
         "translator": "翻譯",
@@ -488,7 +485,6 @@
     },
     "all-filters": {
         "count": "{{count}} {{customize-dashboard-modal.title-smart-filters}}",
-        "create": "{{common.create}}",
         "title": "所有的智慧篩選器"
     },
     "invite-user": {
@@ -515,63 +511,6 @@
         "deselect-all": "{{common.deselect-all}}",
         "title": "{{common.libraries}}",
         "no-data": "尚未設定書庫。"
-    },
-    "license": {
-        "cancel": "{{common.cancel}}",
-        "edit": "{{common.edit}}",
-        "loading": "{{common.loading}}",
-        "activate-email-label": "{{common.email}}",
-        "activate-delete": "{{common.delete}}",
-        "activate-reset": "重設授權",
-        "activate-save": "{{common.save}}",
-        "activate-reset-tooltip": "使用您的授權來使先前的註冊失效。需要提供授權金鑰和電子郵件",
-        "invalid-license-tooltip": "如果您的訂閱已結束，您必須發送電子郵件給支援團隊以創建新的訂閱",
-        "title": "Kavita+ 授權",
-        "license-not-valid": "授權無效",
-        "license-valid": "授權有效",
-        "buy": "購買",
-        "manage": "管理",
-        "check": "檢查",
-        "activate": "激活",
-        "renew": "續訂",
-        "no-license-key": "沒有授權金鑰",
-        "activate-description": "輸入用於註冊Stripe的授權金鑰和電子郵件",
-        "activate-license-label": "授權金鑰",
-        "activate-discordId-label": "Discord 使用者 ID",
-        "activate-discordId-tooltip": "將您的 Discord 帳戶與 Kavita+ 連結。這將授予您訪問隱藏頻道的權限，以幫助塑造 Kavita。",
-        "discord-validation": "這不是有效的 Discord 使用者 ID。您的使用者 ID 不是您的 Discord 使用者名。",
-        "kavita+-desc-part-2": "「進階福利」",
-        "kavita+-desc-part-3": "就在今天！",
-        "kavita+-desc-part-1": "Kavita+ 是一項加值訂閱服務，能為此 Kavita 實例上的所有使用者解鎖更多功能。立即購買訂閱，享受 ",
-        "kavita+-requirement": "Kavita+ 僅支援 Kavita 的最新三個版本。超出此範圍的版本，其功能可能無法正常運作。",
-        "help-label": "{{common.help}}",
-        "supported-version-label": "授權支援版本",
-        "faq-title": "常見問題",
-        "info-title": "授權資訊",
-        "k+-unlocked-description": "歡迎使用 Kavita+！Kavita 會根據您的閱讀進度、評分以及「想讀」清單產生 Scrobble 事件。一旦您在帳戶中註冊了 Scrobbling 提供者，即可啟用此功能。請花些時間為不想要進行 Scrobble 的書籍系列設定「暫停 Scrobble」，以確保不會同步這些內容。",
-        "license-active-label": "授權已啟用",
-        "reset-label": "重設",
-        "expiration-label": "到期",
-        "valid-tooltip": "有效",
-        "invalid-tooltip": "無效",
-        "manage-tooltip": "可以更新付款資訊、取消／暫停訂閱等操作",
-        "email-label": "註冊電子郵件",
-        "license-mismatch": "此授權可能已註冊到其他 Kavita 實例。請重新註冊以修正此問題。",
-        "k+-license-overwrite": "您的授權已註冊到另一個 Kavita 實例。這情況可能發生在您重新安裝 Kavita 時，或極少數情況下因系統更新而導致。請選擇「覆寫」強制用此實例註冊 Kavita+。",
-        "delete-label": "移除授權",
-        "actions-title": "操作",
-        "reset-tooltip": "這將重設 Kavita+ 授權綁定的伺服器實例。需要您的電子郵件和授權金鑰",
-        "delete-tooltip": "這會將授權從 Kavita 移除，停止 Kavita 與 Kavita+ 之間的通訊。此操作不會取消您的訂閱。 若要取消訂閱，請先使用「管理」功能。",
-        "total-subbed-months-label": "總訂閱月數",
-        "overwrite": "覆寫",
-        "k+-already-registered-header": "授權已被註冊",
-        "k+-unlocked": "Kavita+ 已解鎖！",
-        "kavita+-warning": "Kavita+ 是獨立於 Kavita 之外的服務。若在解除安裝前未先取消訂閱，系統將會持續計費。",
-        "cancel-label": "取消訂閱",
-        "cancel-tooltip": "取消您的訂閱並刪除 Kavita 內的授權金鑰。",
-        "resend-license-email": "將授權金鑰傳送至電子郵件",
-        "resend-license-email-tooltip": "重新將 Kavita+ 授權金鑰傳送至電子郵件。授權金鑰必須與此伺服器綁定後方可生效。",
-        "supportId-label": "支援 ID"
     },
     "book-line-overlay": {
         "copy": "複製",
@@ -861,7 +800,8 @@
         "length-title": "{{edit-chapter-modal.words-label}}",
         "age-rating-title": "{{metadata-fields.age-rating-title}}",
         "folder-path-title": "資料夾路徑",
-        "file-path-title": "檔案"
+        "file-path-title": "檔案",
+        "bytes-count": "{{num}} bytes"
     },
     "related-tab": {
         "reading-lists-title": "{{reading-lists.title}}",
@@ -905,10 +845,12 @@
         "no-data": "尚未創建收藏"
     },
     "entity-title": {
-        "issue-num": "{{common.issue-hash-num}}",
-        "book-num": "{{common.book-num-shorthand}}",
+        "issue-num": "第 {{num}} 期",
+        "book-num": "Book {{num}}",
         "special": "特集",
-        "single-volume": "單卷"
+        "single-volume": "單卷",
+        "chapter-num": "第 {{num}} 章",
+        "volume-num": "第 {{num}} 卷"
     },
     "manage-media-issues": {
         "filter-label": "{{common.filter}}",
@@ -1073,7 +1015,6 @@
         "reset-to-default": "{{common.reset-to-default}}",
         "reset": "{{common.reset}}",
         "save": "{{common.save}}",
-        "required": "{{validation.required-field}}",
         "cleanup-label": "清理",
         "bust-locale-task-desc": "清除區域快取。這可以解決更新後字串未正確顯示的問題。需要刷新瀏覽器。",
         "convert-media-task-desc": "執行一個長時間運行的任務，將所有由Kavita管理的媒體轉換為目標編碼。這個過程較慢（特別是在ARM設備上）。",
@@ -1085,10 +1026,7 @@
         "library-scan-tooltip": "Kavita 要多久掃描並刷新一次書庫文件的元數據。",
         "library-database-backup-label": "Kavita 備份",
         "library-database-backup-tooltip": "Kavita 要多久備份一次書庫及其他相關檔案。",
-        "cron-notation": "這不是有效的 Cron 表達式",
         "recurring-tasks-title": "{{title}}",
-        "disabled": "禁用",
-        "weekly": "每週",
         "bust-cache-task-desc": "清除 Kavita+ 快取 - 僅應在調試錯誤匹配時使用。",
         "bust-locale-task": "清除區域快取",
         "bust-locale-task-success": "已清除區域快取",
@@ -1105,11 +1043,8 @@
         "clear-reading-cache-task": "清理閱讀快取",
         "action-header": "操作",
         "job-title-header": "工作名稱",
-        "custom": "自訂",
         "convert-media-task": "將媒體轉換為目標編碼",
         "bust-cache-task-success": "已清除 Kavita+ 快取",
-        "custom-label": "自訂排程（Cron 表達式）",
-        "daily": "每日",
         "clear-reading-cache-task-desc": "清除閱讀的快取檔案。當您在過去 24 小時內更新了之前閱讀的檔案時，此功能非常有用。",
         "convert-media-task-success": "已將媒體編碼轉換加入佇列",
         "sync-themes-task": "主題同步",
@@ -1225,8 +1160,7 @@
         "sync-progress": "系列收藏：{{title}}",
         "last-sync": "最後同步時間：{{date}}",
         "no-data": "目前沒有項目。請嘗試添加一個系列。",
-        "no-data-filtered": "沒有項目符合您當前的篩選條件。",
-        "title-alt": "Kavita - {{collectionName}} 收藏"
+        "no-data-filtered": "沒有項目符合您當前的篩選條件。"
     },
     "all-collections": {
         "item-count": "{{common.item-count}}",
@@ -1276,7 +1210,6 @@
         "date-range-title": "日期範圍",
         "edit-label": "編輯模式",
         "reorder-alt": "重新排序項目",
-        "dnd-warning": "在行動裝置上或當書單超過 100 項時，將無法使用拖放功能。",
         "loading-alt": "{{pdf-reader.loading-message}}"
     },
     "events-widget": {
@@ -1375,28 +1308,11 @@
         "track": "追蹤",
         "title": "MAL Interest Stack 匯入",
         "description": "匯入您的 MAL Interest Stacks，並在 Kavita 中創建收藏",
-        "nothing-found": "未找到任何內容",
         "restack-count": "{{num}} Restacks"
     },
     "import-cbl-modal": {
         "close": "{{common.close}}",
-        "cbl-repo": "您可以在社群<a href='https://github.com/DieselTech/CBL-ReadingLists' target='_blank' rel='noopener noreferrer'>repository</a>中找到更多書單。",
-        "validate-warning": "CBL 檔案存在問題，匯入已停止。請修正這些問題後再試一次。",
-        "import-description": "請先匯入一個 .cbl 檔案，Kavita 將在匯入之前進行多項檢查，某些步驟可能會因檔案問題而停止進行。",
-        "validate-no-issue-description": "未發現 CBL 問題，請按“下一步”。",
-        "restart": "重新開始",
-        "import": "匯入",
-        "import-step": "匯入CBL檔",
-        "dry-run-description": "這是一個模擬運行，顯示了如果您按下“下一步”並執行匯入將會發生什麼。任何失敗的項目將不會被匯入。",
-        "prev": "上一步",
-        "comicvine-parsing-label": "使用 Comic Vine 系列匹配",
-        "validate-description": "所有檔案已被驗證，請查看清單上是否有任何操作需要執行。任何失敗的清單將不會移動到下一步。請修正 CBL 檔案後再重試。",
-        "final-import-step": "最後一步",
-        "validate-cbl-step": "驗證CBL",
-        "dry-run-step": "試運行",
-        "next": "下一步",
-        "title": "CBL匯入",
-        "help-label": "{{common.help}}"
+        "title": "CBL匯入"
     },
     "manga-reader": {
         "auto-close-menu-label": "{{manage-reading-profiles.auto-close-menu-label}}",
@@ -1967,10 +1883,10 @@
         "series-count": "{{num}} 個系列",
         "item-count": "{{num}} 個項目",
         "book-num": "書籍",
-        "chapter-num-shorthand": "第 {{num}}章",
+        "chapter-num-shorthand": "第 {{num}} 章",
         "issue-num-shorthand": "#{{num}}",
-        "book-num-shorthand": "第{{num}}本",
-        "volume-num-shorthand": "第{{num}}卷",
+        "book-num-shorthand": "第 {{num}} 本",
+        "volume-num-shorthand": "第 {{num}} 卷",
         "issue-num": "期",
         "add": "新增",
         "select-all": "全選",
@@ -2055,7 +1971,6 @@
         "confirm-delete-smart-filter": "您確定要刪除此智慧篩選器？",
         "copied-to-clipboard": "已複製到剪貼簿",
         "confirm-library-delete": "您確定要刪除“{{name}}”嗎？此操作無法撤銷。",
-        "anilist-token-expired": "您的 AniList 授權憑證已過期。在您於「使用者設定」>「帳戶」中重新生成之前，將無法處理紀錄功能",
         "confirm-delete-reading-list": "您確定要刪除書單嗎？此操作無法撤銷。",
         "select-files-warning": "您需要先選擇文件才能繼續操作",
         "entity-read": "{{name}}已標記為已讀",
@@ -2681,22 +2596,15 @@
     "match-series-modal": {
         "save": "{{common.save}}",
         "close": "{{common.close}}",
-        "query-label": "查詢",
-        "query-tooltip": "請輸入系列名稱，或是 AniList／MyAnimeList／ComicBookRoundup 的網址。若輸入網址，系統將會直接查詢對應資料。",
         "dont-match-tooltip": "將此系列排除於匹配與 Scrobble 之外",
-        "no-results": "無法找到匹配項目。請嘗試新增支援的網址後再重試。",
         "search": "搜尋",
-        "title": "匹配 {{seriesName}}",
         "description": "選擇一個匹配項目以重新連結 Kavita+ 的中繼資料並重新產生 Scrobble 事件。若選擇 「不匹配」，則可禁止 Kavita 對該項目進行中繼資料匹配與 Scrobble 同步。",
         "dont-match-label": "不匹配"
     },
     "match-series-result-item": {
         "volume-count": "{{server-stats.volume-count}}",
-        "chapter-count": "{{common.chapter-count}}",
-        "issue-count": "{{common.issue-count}}",
-        "releasing": "發行中",
-        "details": "查看頁面",
-        "updating-metadata-status": "更新中繼資料"
+        "chapter-count": "{{ num }} ch",
+        "issue-count": "{{common.issue-count}}"
     },
     "role-localized-pipe": {
         "admin": "管理員",
@@ -2766,7 +2674,6 @@
         "reset-success": "已重設所有使用者的外部 ID，請重新驗證身分以進行連結",
         "sync-user-settings-label": "將使用者設定與 OIDC 角色同步",
         "sync-user-settings-tooltip": "透過 OIDC 建立的使用者將完全由身分提供者管理，包含其角色、媒體庫存取權限及年齡分級。若停用此選項，使用者在帳號建立後將無法存取任何內容。詳情請參閱說明文件。",
-        "disable-password-authentication-tooltip": "擁有管理員角色的使用者不受此限制",
         "defaults-requirement": "當「同步使用者設定」功能關閉時，透過 OIDC 註冊的使用者將採用下列設定",
         "default-age-restriction-tooltip": "顯示給新使用者的最高年齡分級",
         "save": "{{common.save}}",
@@ -2955,14 +2862,9 @@
         "upload": "{{cover-image-chooser.upload}}",
         "delete": "{{common.delete}}",
         "description": "Kavita 的 EPUB 閱讀器內建了數種字型，您也可以在此新增自訂字型。請上傳檔案或使用 Google Fonts 網址。如需詳細資訊，請參閱 <a href='{{wikiLink}}' target='_blank' rel='noreferrer noopener'>wiki</a>。",
-        "enter-an-url-pre-title": "輸入 {{url}}",
-        "url": "網址",
         "upload-continued": "字型檔",
         "preview-default": "透過檔案或 Google Fonts 網址上傳您的自訂字型",
-        "url-label": "網址",
         "filter-system-fonts-label": "篩選系統字型",
-        "back": "返回",
-        "load": "載入",
         "no-preview": "無法預覽此字型，將採用書籍的預設字型樣式。",
         "brown-fox": "天地玄黃，宇宙洪荒。The quick brown fox jumps over the lazy dog"
     },
@@ -3346,5 +3248,14 @@
             "help": "更新方法",
             "download": "下載"
         }
+    },
+    "title": {
+        "reading-list": "書單",
+        "home": "首頁",
+        "bookmarks": "書籤",
+        "collections": "收藏"
+    },
+    "audit-subject-title-pipe": {
+        "collection": "收藏"
     }
 }

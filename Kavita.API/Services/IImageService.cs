@@ -18,9 +18,22 @@ public interface IImageService
     /// <param name="fileName"></param>
     /// <param name="encodeFormat">Convert and save as encoding format</param>
     /// <param name="thumbnailWidth">Width of thumbnail</param>
+    /// <param name="thumbnailHeight">Height of thumbnail</param>
     /// <param name="targetDirectory">If null, will write to <see cref="DirectoryService.CoverImageDirectory"/></param>
     /// <returns>File name with extension of the file. </returns>
-    string CreateThumbnailFromBase64(string encodedImage, string fileName, EncodeFormat encodeFormat, int thumbnailWidth = 320, string? targetDirectory = null);
+    string CreateThumbnailFromBase64(string encodedImage, string fileName, EncodeFormat encodeFormat, int thumbnailWidth = 320, int thumbnailHeight = 455, string? targetDirectory = null);
+
+    /// <summary>
+    /// Creates a thumbnail from an image file already on disk (e.g. one staged in the temp directory).
+    /// </summary>
+    /// <param name="sourceFile">Absolute path to the source image</param>
+    /// <param name="fileName"></param>
+    /// <param name="encodeFormat">Convert and save as encoding format</param>
+    /// <param name="thumbnailWidth">Width of thumbnail</param>
+    /// <param name="thumbnailHeight"></param>
+    /// <param name="targetDirectory">If null, will write to <see cref="DirectoryService.CoverImageDirectory"/></param>
+    /// <returns>File name with extension of the file.</returns>
+    string CreateThumbnailFromFile(string sourceFile, string fileName, EncodeFormat encodeFormat, int thumbnailWidth = 320, int thumbnailHeight = 455, string? targetDirectory = null);
     /// <summary>
     /// Writes out a thumbnail by stream input
     /// </summary>
@@ -58,4 +71,16 @@ public interface IImageService
     /// <returns></returns>
     Task<bool> IsImage(string filePath, CancellationToken ct = default);
     void UpdateColorScape(IHasCoverImage entity);
+
+    /// <summary>
+    /// Downloads an image from the given URL, resizes it, and saves it to the covers directory.
+    /// <remarks>Caller is responsible for validating the URL before calling this method (via <see cref="IUrlValidationService"/> ).</remarks>
+    /// </summary>
+    /// <param name="url">The URL to download the image from</param>
+    /// <param name="fileName">Filename without extension</param>
+    /// <param name="encodeFormat">Convert and save as encoding format</param>
+    /// <param name="thumbnailWidth">Width of thumbnail</param>
+    /// <param name="thumbnailHeight">Height of thumbnail</param>
+    /// <returns>File name with extension of the saved file, or empty string on failure</returns>
+    Task<string> CreateThumbnailFromUrl(string url, string fileName, EncodeFormat encodeFormat, int thumbnailWidth = 320, int thumbnailHeight = 455);
 }

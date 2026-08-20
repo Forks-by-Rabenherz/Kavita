@@ -1,4 +1,5 @@
-using Kavita.Models.Entities.Enums.ReadingList;
+﻿using Kavita.Models.Entities.Enums.ReadingList;
+using System.ComponentModel.DataAnnotations;
 
 namespace Kavita.Models.DTOs.ReadingLists.CBL;
 #nullable enable
@@ -13,6 +14,7 @@ public sealed record CblFinalizeRequestDto
     /// <summary>
     /// Import source type (File, Url, or None)
     /// </summary>
+    [EnumDataType(typeof(ReadingListProvider))]
     public ReadingListProvider Provider { get; set; } = ReadingListProvider.None;
     /// <summary>
     /// Optional repo-relative path for sync tracking
@@ -26,4 +28,9 @@ public sealed record CblFinalizeRequestDto
     /// Optional Git SHA for sync tracking
     /// </summary>
     public string? Sha { get; set; }
+
+    /// <summary>
+    /// Optional flag to promote the RL on creation
+    /// </summary>
+    public bool Promote { get; set; } = false;
 }

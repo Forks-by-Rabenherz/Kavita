@@ -13,6 +13,7 @@ using Kavita.Models.Builders;
 using Kavita.Models.DTOs.ReadingLists;
 using Kavita.Models.DTOs.ReadingLists.CBL;
 using Kavita.Models.DTOs.ReadingLists.CBL.V1;
+using Kavita.Models.DTOs.ReadingLists.Request;
 using Kavita.Models.Entities;
 using Kavita.Models.Entities.Enums;
 using Kavita.Models.Entities.ReadingLists;
@@ -40,7 +41,7 @@ public class ReadingListServiceTests(ITestOutputHelper outputHelper): AbstractDb
             Substitute.For<IEventHub>(), Substitute.For<IImageService>(),
             new DirectoryService(Substitute.For<ILogger<DirectoryService>>(), new MockFileSystem()),
             Substitute.For<IScrobblingService>(), Substitute.For<IReadingSessionService>(),
-            Substitute.For<IClientInfoAccessor>(), Substitute.For<ISeriesService>(), Substitute.For<IEntityNamingService>(),
+            Substitute.For<IClientInfoAccessor>(), Substitute.For<IEntityNamingService>(),
             Substitute.For<ILocalizationService>(), Substitute.For<IBookService>());
 
         return (readingListService, readerService);
@@ -1283,7 +1284,7 @@ public class ReadingListServiceTests(ITestOutputHelper outputHelper): AbstractDb
     {
 
         // Setup 2 series, only do this once tho
-        if (await unitOfWork.SeriesRepository.DoesSeriesNameExistInLibrary("Series 1", 1, MangaFormat.Archive))
+        if (await unitOfWork.SeriesRepository.DoesSeriesNameExistInLibraryAsync("Series 1", 1, MangaFormat.Archive))
         {
             return new Tuple<Series, Series>(await unitOfWork.SeriesRepository.GetFullSeriesForSeriesIdAsync(1),
                 await unitOfWork.SeriesRepository.GetFullSeriesForSeriesIdAsync(2));

@@ -57,7 +57,7 @@ public class DownloadController(
     [HttpPost("bulk-volume-size")]
     public async Task<ActionResult<Dictionary<int, long>>> GetBulkVolumeSize(BulkVolumeSizeRequest request)
     {
-        return Ok(await unitOfWork.VolumeRepository.GetFilesizesAsync(request.VolumeIds));
+        return Ok(await unitOfWork.VolumeRepository.GetFilesizesAsync(UserId, request.VolumeIds));
     }
 
     /// <summary>
@@ -81,7 +81,7 @@ public class DownloadController(
     [HttpPost("bulk-chapter-size")]
     public async Task<ActionResult<Dictionary<int, long>>> GetChapterSizeInBulk(BulkChapterSizeRequest request)
     {
-        return Ok(await unitOfWork.ChapterRepository.GetFilesizesAsync(request.ChapterIds));
+        return Ok(await unitOfWork.ChapterRepository.GetFilesizesAsync(UserId, request.ChapterIds));
     }
 
     /// <summary>
@@ -127,7 +127,7 @@ public class DownloadController(
     [HttpPost("bulk-series-size")]
     public async Task<ActionResult<Dictionary<int, long>>> GetBulkSeriesSize(BulkSeriesSizeRequest request)
     {
-        return Ok(await unitOfWork.SeriesRepository.GetFilesizesAsync(request.SeriesIds));
+        return Ok(await unitOfWork.SeriesRepository.GetFilesizesAsync(UserId, request.SeriesIds));
     }
 
 
@@ -143,7 +143,7 @@ public class DownloadController(
     public async Task<ActionResult> DownloadVolume(int volumeId, [FromQuery] string? correlationId = null)
     {
         var volume = await unitOfWork.VolumeRepository.GetVolumeByIdAsync(volumeId);
-        if (volume == null) return BadRequest(await localizationService.Translate(UserId, "volume-doesnt-exist"));
+        if (volume == null) return BadRequest(await localizationService.TranslateAsync(UserId, "volume-doesnt-exist"));
 
         var files = await unitOfWork.VolumeRepository.GetFilesForVolume(volumeId);
         var series = await unitOfWork.SeriesRepository.GetSeriesByIdAsync(volume.SeriesId);
@@ -175,7 +175,7 @@ public class DownloadController(
     {
         var files = await unitOfWork.ChapterRepository.GetFilesForChapterAsync(chapterId);
         var chapter = await unitOfWork.ChapterRepository.GetChapterAsync(chapterId);
-        if (chapter == null) return BadRequest(await localizationService.Translate(UserId, "chapter-doesnt-exist"));
+        if (chapter == null) return BadRequest(await localizationService.TranslateAsync(UserId, "chapter-doesnt-exist"));
 
         var volume = await unitOfWork.VolumeRepository.GetVolumeByIdAsync(chapter.VolumeId);
         var series = await unitOfWork.SeriesRepository.GetSeriesByIdAsync(volume!.SeriesId);
@@ -249,7 +249,7 @@ public class DownloadController(
         var series = await unitOfWork.SeriesRepository.GetSeriesByIdAsync(seriesId);
         if (series == null) return BadRequest("Invalid Series");
 
-        var files = await unitOfWork.SeriesRepository.GetFilesForSeries(seriesId);
+        var files = await unitOfWork.SeriesRepository.GetFilesForSeriesAsync(seriesId);
         try
         {
             return await DownloadFiles(files, $"download_{Username!}_s{seriesId}", $"{series.Name}.zip", correlationId);
@@ -276,13 +276,13 @@ public class DownloadController(
         if (!await unitOfWork.UserRepository.HasAccessToSeries(UserId, seriesId, HttpContext.RequestAborted))
             return NotFound();
 
-        if (!downloadBookmarkDto.Bookmarks.Any()) return BadRequest(await localizationService.Translate(UserId, "bookmarks-empty"));
+        if (!downloadBookmarkDto.Bookmarks.Any()) return BadRequest(await localizationService.TranslateAsync(UserId, "bookmarks-empty"));
 
         var userId = UserId;
         var username = Username!;
         var series = await unitOfWork.SeriesRepository.GetSeriesByIdAsync(seriesId);
 
-        var files = await bookmarkService.GetBookmarkFilesById(downloadBookmarkDto.Bookmarks.Select(b => b.Id));
+        var files = await bookmarkService.GetBookmarkFilesById(seriesId, downloadBookmarkDto.Bookmarks.Select(b => b.Id));
 
         var filename = $"{series!.Name} - Bookmarks.zip";
 

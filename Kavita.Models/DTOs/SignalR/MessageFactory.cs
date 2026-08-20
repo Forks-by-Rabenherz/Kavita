@@ -1,9 +1,11 @@
 ﻿using System;
 using Kavita.Common.Extensions;
 using Kavita.Models.DTOs.Account;
+using Kavita.Models.DTOs.KavitaPlus.Scrobble;
 using Kavita.Models.DTOs.Reader;
 using Kavita.Models.DTOs.Update;
 using Kavita.Models.Entities.Enums;
+using Kavita.Models.Entities.ReadingLists;
 
 namespace Kavita.Models.DTOs.SignalR;
 
@@ -182,7 +184,30 @@ public static class MessageFactory
     /// An Auth key has been deleted
     /// </summary>
     public const string AuthKeyDeleted = nameof(AuthKeyDeleted);
-
+    /// <summary>
+    /// A reading list was updated via a Sync Operation
+    /// </summary>
+    public const string ReadingListUpdated = nameof(ReadingListUpdated);
+    /// <summary>
+    /// A series was updated (E.x. K+ match)
+    /// </summary>
+    public const string SeriesUpdated = nameof(SeriesUpdated);
+    /// <summary>
+    /// A scrobble provider has had their (authentication) details updated
+    /// </summary>
+    public const string ScrobbleProviderUpdated = nameof(ScrobbleProviderUpdated);
+    /// <summary>
+    /// The K+ license info has updated
+    /// </summary>
+    public const string LicenseInfoUpdate = nameof(LicenseInfoUpdate);
+    /// <summary>
+    /// The K+ Metadata for a series has been updated
+    /// </summary>
+    public const string ExternalMetadataUpdate = nameof(ExternalMetadataUpdate);
+    /// <summary>
+    /// Progress event send after a batch completes
+    /// </summary>
+    public const string RerunMetadataMappingsProgress = nameof(RerunMetadataMappingsProgress);
 
 
     public static SignalRMessage DashboardUpdateEvent(int userId)
@@ -588,7 +613,7 @@ public static class MessageFactory
         };
     }
 
-    public static SignalRMessage UserProgressUpdateEvent(int userId, string username, int seriesId, int volumeId, int chapterId, int pagesRead)
+    public static SignalRMessage UserProgressUpdateEvent(int userId, int seriesId, int volumeId, int chapterId, int pagesRead)
     {
         return new SignalRMessage()
         {
@@ -598,7 +623,6 @@ public static class MessageFactory
             Body = new
             {
                 UserId = userId,
-                Username = username,
                 SeriesId = seriesId,
                 VolumeId = volumeId,
                 ChapterId = chapterId,
@@ -803,6 +827,77 @@ public static class MessageFactory
             Body = new
             {
                 Id = id
+            }
+        };
+    }
+
+    public static SignalRMessage ReadingListUpdatedEvent(int id)
+    {
+        return new SignalRMessage
+        {
+            Name = ReadingListUpdated,
+            Body = new
+            {
+                Id = id
+            }
+        };
+    }
+
+    public static SignalRMessage SeriesUpdatedEvent(int seriesId)
+    {
+        return new SignalRMessage
+        {
+            Name = SeriesUpdated,
+            Body = new
+            {
+                Id = seriesId
+            }
+        };
+    }
+
+    public static SignalRMessage ScrobbleProviderUpdatedEvent(ScrobbleProvider provider)
+    {
+        return new SignalRMessage
+        {
+            Name = ScrobbleProviderUpdated,
+            Body = new
+            {
+                Provider = provider
+            }
+        };
+    }
+
+    public static SignalRMessage LicenseInfoUpdateEvent()
+    {
+        return new SignalRMessage
+        {
+            Name = LicenseInfoUpdate
+        };
+    }
+
+    public static SignalRMessage ExternalMetadataUpdateEvent(int seriesId)
+    {
+        return new SignalRMessage
+        {
+            Name = ExternalMetadataUpdate,
+            Body = new
+            {
+                SeriesId = seriesId
+            }
+        };
+    }
+
+    public static SignalRMessage ReRunMappingsProgressEvent(string progressEventType, float progress)
+    {
+        return new SignalRMessage()
+        {
+            Name = RerunMetadataMappingsProgress,
+            Title = "Rerun Metadata Mappings",
+            Progress = ProgressType.Determinate,
+            EventType = progressEventType,
+            Body = new
+            {
+                Progress = progress,
             }
         };
     }

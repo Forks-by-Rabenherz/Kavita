@@ -1,21 +1,12 @@
-import {
-  ChangeDetectionStrategy,
-  ChangeDetectorRef,
-  Component,
-  computed,
-  DestroyRef,
-  inject,
-  OnInit,
-  signal
-} from '@angular/core';
+import {ChangeDetectionStrategy, Component, computed, inject, OnInit, signal} from '@angular/core';
 import {AccountService} from '../../_services/account.service';
 import {ToastrService} from 'ngx-toastr';
 import {ConfirmService} from '../../shared/confirm.service';
 import {ModalService} from '../../_services/modal.service';
-import {DatePipe, NgTemplateOutlet} from '@angular/common';
+import {NgTemplateOutlet} from '@angular/common';
 import {FileSystemFileEntry, NgxFileDropEntry, NgxFileDropModule} from 'ngx-file-drop';
 import {ReadingListService} from '../../_services/reading-list.service';
-import {ReadingList, ReadingListProvider} from '../../_models/reading-list';
+import {ReadingList, ReadingListProvider} from '../../_models/reading-list/reading-list';
 import {LoadingComponent} from '../../shared/loading/loading.component';
 import {translate, TranslocoDirective} from '@jsverse/transloco';
 import {BrowseCblRepoModalComponent} from '../_modals/browse-cbl-repo-modal/browse-cbl-repo-modal.component';
@@ -23,17 +14,25 @@ import {ImportCblModalComponent} from '../_modals/import-cbl-modal/import-cbl-mo
 import {CblService} from '../../_services/cbl.service';
 import {CblRepoItem} from '../../_models/reading-list/cbl/cbl-repo-item';
 import {CblSavedFile} from '../../_models/reading-list/cbl/cbl-saved-file';
-import {FormControl, FormGroup, ReactiveFormsModule} from '@angular/forms';
+import {ReactiveFormsModule} from '@angular/forms';
 import {PromotedIconComponent} from '../../shared/_components/promoted-icon/promoted-icon.component';
 import {ReadingListProviderPipe} from '../../_pipes/reading-list-provider.pipe';
 import {forkJoin} from 'rxjs';
 import {ImageService} from '../../_services/image.service';
 import {ReadMoreComponent} from '../../shared/read-more/read-more.component';
 import {ImageComponent} from '../../shared/image/image.component';
-import {AgeRatingPipe} from '../../_pipes/age-rating.pipe';
 import {RouterLink} from '@angular/router';
 import {fullscreenModal} from "../../_models/modal/modal-options";
 import {ModalResult} from "../../_models/modal/modal-result";
+import {
+  FileDragAndDropUploadComponent
+} from "src/app/shared/file-drag-and-drop-upload/file-drag-and-drop-upload.component";
+import {UtcToLocalDatePipe} from "../../_pipes/utc-to-locale-date.pipe";
+import {TimeAgoPipe} from "../../_pipes/time-ago.pipe";
+import {AgeRatingImageComponent} from "../../_single-module/age-rating-image/age-rating-image.component";
+import {DateYearRangePipe} from "../../_pipes/date-year-range.pipe";
+import {SafeUrlPipe} from "../../_pipes/safe-url.pipe";
+import {NgbDropdown, NgbDropdownItem, NgbDropdownMenu, NgbDropdownToggle, NgbTooltip} from "@ng-bootstrap/ng-bootstrap";
 
 @Component({
   selector: 'app-cbl-manager',
@@ -47,32 +46,35 @@ import {ModalResult} from "../../_models/modal/modal-result";
     ReadingListProviderPipe,
     ReadMoreComponent,
     ImageComponent,
-    AgeRatingPipe,
     RouterLink,
-    DatePipe
+    FileDragAndDropUploadComponent,
+    UtcToLocalDatePipe,
+    TimeAgoPipe,
+    AgeRatingImageComponent,
+    SafeUrlPipe,
+    NgbTooltip,
+    NgbDropdown,
+    NgbDropdownItem,
+    NgbDropdownMenu,
+    NgbDropdownToggle
   ],
   templateUrl: './cbl-manager.component.html',
   styleUrl: './cbl-manager.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class CblManagerComponent implements OnInit {
-  private readonly destroyRef = inject(DestroyRef);
   protected readonly ReadingListProvider = ReadingListProvider;
   protected readonly accountService = inject(AccountService);
   private readonly toastr = inject(ToastrService);
-  private readonly cdRef = inject(ChangeDetectorRef);
   private readonly confirmService = inject(ConfirmService);
   private readonly modalService = inject(ModalService);
   private readonly readingListService = inject(ReadingListService);
   private readonly cblService = inject(CblService);
   protected readonly imageService = inject(ImageService);
 
-  form = new FormGroup({
-    cblUrl: new FormControl('', [])
-  });
   files: NgxFileDropEntry[] = [];
   acceptableExtensions = ['.cbl', '.json'].join(',');
-  uploadMode = signal<'file' | 'url' | 'all'>('all');
+  private readonly dateYearRangePipe = new DateYearRangePipe();
   isUploadingCbl = signal<boolean>(false);
   allLists = signal<ReadingList[]>([]);
 
@@ -100,6 +102,8 @@ export class CblManagerComponent implements OnInit {
     }
     return lists;
   });
+
+
 
   ngOnInit() {
     this.readingListService.getReadingLists(false).subscribe(lists => {
@@ -161,14 +165,10 @@ export class CblManagerComponent implements OnInit {
     });
   }
 
-  uploadFromUrl() {
-    const url = this.form.get('cblUrl')?.value?.trim();
-    if (!url) return;
-
+  uploadFromUrl(url: string) {
     this.isUploadingCbl.set(true);
     this.cblService.importFromUrl(url).subscribe({
       next: (savedFile) => {
-        this.form.get('cblUrl')!.setValue('');
         this.isUploadingCbl.set(false);
         this.openImportModal([savedFile]);
       },
@@ -181,6 +181,38 @@ export class CblManagerComponent implements OnInit {
 
   setProviderFilter(provider: ReadingListProvider | null) {
     this.providerFilter.set(this.providerFilter() === provider ? null : provider);
+  }
+
+  syncReadingList(list: ReadingList) {
+    this.cblService.syncList(list.id, true).subscribe(() => {
+      this.toastr.success(translate('toasts.reading-list-sync-enqueued'));
+    });
+  }
+
+  manualSyncReadingList(list: ReadingList) {
+    this.cblService.importFromUrl(list.downloadUrl!).subscribe((savedFile) => {
+      this.openImportModal([savedFile]);
+    });
+  }
+
+  getDateRangeLabel(rl: ReadingList) {
+    if (!rl || rl.startingYear === 0) return null;
+
+    // Reading list dates start with 1, JS Date starts with 0
+    const startMonth = rl.startingMonth > 0 ? rl.startingMonth - 1 : undefined;
+    const endMonth = rl.startingMonth > 0 ? rl.endingMonth - 1 : undefined;
+
+    const startDate = startMonth !== undefined ? new Date(rl.startingYear, startMonth) : new Date(rl.startingYear, 0);
+    const endDate = rl.endingYear <= 0 ? null :
+      (endMonth !== undefined ? new Date(rl.endingYear, endMonth) : new Date(rl.endingYear, 0));
+
+    return this.dateYearRangePipe.transform(startDate, endDate, !!endMonth);
+  }
+
+  getMissingCount(rl: ReadingList) {
+    if (rl.totalItemsAtImport === 0) return 0;
+    if (rl.itemCount > rl.totalItemsAtImport) return 0;
+    return rl.totalItemsAtImport - rl.itemCount;
   }
 
   async deleteList(list: ReadingList) {

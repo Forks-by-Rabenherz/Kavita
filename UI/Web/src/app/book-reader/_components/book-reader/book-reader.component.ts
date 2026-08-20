@@ -113,6 +113,20 @@ const minImageSize = {
  */
 const SCROLL_DELAY = 10;
 
+const KEYBIND_TARGETS = [
+  {keyBindTarget: KeyBindTarget.PageLeft, description: 'prev-page'},
+  {keyBindTarget: KeyBindTarget.PageRight, description: 'next-page'},
+  {keyBindTarget: KeyBindTarget.GoTo, description: 'go-to'},
+  {keyBindTarget: KeyBindTarget.ToggleFullScreen},
+  {keyBindTarget: KeyBindTarget.ToggleMenu},
+  {keyBindTarget: KeyBindTarget.OpenHelp},
+  {keyBindTarget: KeyBindTarget.Escape},
+  {keyBindTarget: KeyBindTarget.PreviousChapter, description: 'previous-chapter'},
+  {keyBindTarget: KeyBindTarget.NextChapter, description: 'next-chapter'},
+  {keyBindTarget: KeyBindTarget.FirstPage, description: 'first-page'},
+  {keyBindTarget: KeyBindTarget.LastPage, description: 'last-page'},
+];
+
 @Component({
   selector: 'app-book-reader',
   templateUrl: './book-reader.component.html',
@@ -310,10 +324,6 @@ export class BookReaderComponent implements OnInit, AfterViewInit, OnDestroy {
    * Library Type used for rendering chapter or issue
    */
    libraryType: LibraryType = LibraryType.Book;
-  /**
-   * If the web browser is in fullscreen mode
-   */
-  isFullscreen: boolean = false;
 
 
   /**
@@ -630,7 +640,7 @@ export class BookReaderComponent implements OnInit, AfterViewInit, OnDestroy {
 
       if (pageNum >= maxPages - 10) {
         // Tell server to cache the next chapter
-        if (!this.nextChapterPrefetched && this.nextChapterId !== CHAPTER_ID_DOESNT_EXIST) {
+        if (!this.nextChapterPrefetched && this.nextChapterId !== CHAPTER_ID_DOESNT_EXIST && this.nextChapterId !== CHAPTER_ID_NOT_FETCHED) {
           this.readerService.getChapterInfo(this.nextChapterId).pipe(catchError(err => {
             this.nextChapterDisabled = true;
             console.error(err);
@@ -642,7 +652,7 @@ export class BookReaderComponent implements OnInit, AfterViewInit, OnDestroy {
       }
 
       if (pageNum <= 10) {
-        if (!this.prevChapterPrefetched && this.prevChapterId !== CHAPTER_ID_DOESNT_EXIST) {
+        if (!this.prevChapterPrefetched && this.prevChapterId !== CHAPTER_ID_DOESNT_EXIST && this.prevChapterId !== CHAPTER_ID_NOT_FETCHED) {
           this.readerService.getChapterInfo(this.prevChapterId).pipe(catchError(err => {
             this.prevChapterDisabled = true;
             console.error(err);
@@ -685,15 +695,29 @@ export class BookReaderComponent implements OnInit, AfterViewInit, OnDestroy {
             await this.goToPage();
             break;
           case KeyBindTarget.ToggleFullScreen:
-            this.applyFullscreen();
+            this.toggleFullscreen();
             break;
           case KeyBindTarget.ToggleMenu:
             this.actionBarVisible.update(x => !x);
             break;
+          case KeyBindTarget.FirstPage:
+            await this.goToPage(0);
+            break;
+          case KeyBindTarget.LastPage:
+            await this.goToPage(this.maxPages() - 1);
+            break;
+          case KeyBindTarget.PreviousChapter:
+            this.loadPrevChapter();
+            break;
+          case KeyBindTarget.NextChapter:
+            this.loadNextChapter();
+            break;
+          case KeyBindTarget.OpenHelp:
+            this.openShortcutModal();
+            break;
         }
       },
-      [KeyBindTarget.PageLeft, KeyBindTarget.PageRight, KeyBindTarget.Escape, KeyBindTarget.GoTo,
-        KeyBindTarget.ToggleFullScreen, KeyBindTarget.ToggleMenu],
+      KEYBIND_TARGETS.map(k => k.keyBindTarget as KeyBindTarget),
     );
 
     this.keyBindService.registerListener(
@@ -838,12 +862,13 @@ export class BookReaderComponent implements OnInit, AfterViewInit, OnDestroy {
 
     this.navService.showNavBar();
     this.navService.showSideNav();
+    this.readerService.exitFullscreen();
   }
 
   async ngOnInit() {
     this.fontService.getFonts().subscribe(fonts => {
       fonts.filter(f => f.name !== FontService.DefaultEpubFont).forEach(font => {
-        this.fontService.getFontFace(font).load().then(loadedFace => {
+        this.fontService.getFontFace(font, this.fontService.resolveCssFamily(font)).load().then(loadedFace => {
           (this.document as any).fonts.add(loadedFace);
         });
       });
@@ -1070,6 +1095,7 @@ export class BookReaderComponent implements OnInit, AfterViewInit, OnDestroy {
 }
 
   closeReader() {
+    this.readerService.closeShortCutModal();
     this.readerService.closeReader(this.libraryId, this.seriesId, this.chapterId, this.readingListMode, this.readingListId);
   }
 
@@ -1283,6 +1309,8 @@ export class BookReaderComponent implements OnInit, AfterViewInit, OnDestroy {
    * We can't use a wrapper due to potential for styling issues.
    */
   injectImageBookmarkIndicators(forceRefresh = false) {
+    if (this.readingProfile.bookReaderDisableBookmarkIcon) return;
+
     const imgs = Array.from(this.readingSectionElemRef().nativeElement.querySelectorAll('img') ?? []);
 
     const bookmarksForPage = (this.imageBookmarks() ?? []).filter(b => b.page === this.pageNum());
@@ -2072,7 +2100,7 @@ export class BookReaderComponent implements OnInit, AfterViewInit, OnDestroy {
         this.showPaginationOverlay(res.object as boolean);
         break;
       case "fullscreen":
-        this.applyFullscreen();
+        this.toggleFullscreen();
         break;
       case "writingStyle":
         this.applyWritingStyle();
@@ -2088,7 +2116,10 @@ export class BookReaderComponent implements OnInit, AfterViewInit, OnDestroy {
         break;
       case 'theme':
         this.applyColorTheme(res.object as BookTheme);
-        return;
+        break;
+      case "bookReaderDisableBookmarkIcon":
+        this.applyBookmarkIcons(!(res.object as boolean));
+        break;
     }
   }
 
@@ -2172,26 +2203,8 @@ export class BookReaderComponent implements OnInit, AfterViewInit, OnDestroy {
     this.saveProgress();
   }
 
-  applyFullscreen() {
-    this.isFullscreen = this.readerService.checkFullscreenMode();
-    if (this.isFullscreen) {
-      this.readerService.toggleFullscreen(this.reader().nativeElement, () => {
-        this.isFullscreen = false;
-        this.cdRef.markForCheck();
-        this.renderer.removeStyle(this.reader().nativeElement, 'background');
-      });
-    } else {
-      this.readerService.toggleFullscreen(this.reader().nativeElement, () => {
-        this.isFullscreen = true;
-        this.cdRef.markForCheck();
-        // HACK: This is a bug with how browsers change the background color for fullscreen mode
-        const reader = this.reader();
-        this.renderer.setStyle(reader.nativeElement, 'background', this.themeService.getCssVariable('--bs-body-color'));
-        if (!this.darkMode()) {
-          this.renderer.setStyle(reader.nativeElement, 'background', 'white');
-        }
-      });
-    }
+  toggleFullscreen() {
+    this.readerService.toggleFullscreen();
   }
 
   applyWritingStyle() {
@@ -2252,6 +2265,16 @@ export class BookReaderComponent implements OnInit, AfterViewInit, OnDestroy {
     }
 
     this.cdRef.markForCheck();
+  }
+
+  applyBookmarkIcons(show: boolean) {
+     if (show) {
+       this.injectImageBookmarkIndicators(true);
+       return;
+     }
+
+    const existingOverlays = this.readingSectionElemRef().nativeElement.querySelectorAll('.bookmark-overlay');
+    existingOverlays.forEach(overlay => overlay.remove());
   }
 
   updateReadingSectionHeight() {
@@ -2392,6 +2415,10 @@ export class BookReaderComponent implements OnInit, AfterViewInit, OnDestroy {
 
   updateLineOverlayOpen(isOpen: boolean) {
     this.isLineOverlayOpen.set(isOpen);
+  }
+
+  openShortcutModal() {
+    this.readerService.openShortcutModal(KEYBIND_TARGETS, true);
   }
 
 

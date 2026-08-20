@@ -70,6 +70,11 @@ export enum KeyBindTarget {
   PageUp = 'PageUp',
   PageDown = 'PageDown',
   OffsetDoublePage = 'OffsetDoublePage',
+  NextChapter = 'NextChapter',
+  PreviousChapter = 'PreviousChapter',
+  FirstPage = 'FirstPage',
+  LastPage = 'LastPage',
+  NavigateHome = 'NavigateHome',
 }
 
 export interface OpdsPreferences {

@@ -99,9 +99,14 @@ public sealed class DataContext : IdentityDbContext<AppUser, AppRole, int,
     public DbSet<ClientDeviceHistory> ClientDeviceHistory { get; set; } = null!;
     public DbSet<AppUserAuthKey> AppUserAuthKey { get; set; } = null!;
 
+    public DbSet<ReadingListTag> ReadingListTag { get; set; } = null!;
     public DbSet<ReadingListRemapRule> ReadingListRemapRule { get; set; } = null!;
 
     public DbSet<DataProtectionKey> DataProtectionKeys { get; set; } = null!;
+
+    public DbSet<KavitaPlusAuditLog> KavitaPlusAuditLogs { get; set; } = null!;
+
+    public DbSet<ScrobbleRuleHistory> ScrobbleRuleHistory { get; set; } = null!;
 
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -214,6 +219,12 @@ public sealed class DataContext : IdentityDbContext<AppUser, AppRole, int,
             .HasJsonConversion([])
             .HasColumnType("TEXT")
             .HasDefaultValue(new List<MetadataSettingField>());
+
+        builder.Entity<Volume>()
+            .Property(sm => sm.KPlusOverrides)
+            .HasJsonConversion([])
+            .HasColumnType("TEXT")
+            .HasDefaultValue(new List<MetadataSettingField>());
         #endregion
 
         #region User & Preferences
@@ -288,6 +299,13 @@ public sealed class DataContext : IdentityDbContext<AppUser, AppRole, int,
             .HasJsonConversion(new AppUserOpdsPreferences())
             .HasColumnType("TEXT")
             .HasDefaultValue(new AppUserOpdsPreferences());
+
+        builder.Entity<AppUser>()
+            .Property(u => u.ScrobbleProviders)
+            .HasJsonConversion(new Dictionary<ScrobbleProvider, AppUserScrobbleProvider>())
+            .HasColumnType("TEXT")
+            .HasDefaultValue(new Dictionary<ScrobbleProvider, AppUserScrobbleProvider>());
+
         #endregion
 
         #region AppUserReadingProfile
@@ -376,6 +394,13 @@ public sealed class DataContext : IdentityDbContext<AppUser, AppRole, int,
             entity.HasIndex(s => new { s.IsActive, s.LastModifiedUtc })
                 .HasDatabaseName("IX_AppUserReadingSession_IsActive_LastModifiedUtc");
         });
+
+        builder.Entity<AppUserReadingHistory>(entity =>
+        {
+            entity.HasIndex(s => new { s.AppUserId, s.DateUtc})
+                .HasDatabaseName("IX_AppUserReadingHistory_AppUserId_DateUtc");
+        });
+
         #endregion
 
         #region Client Device
@@ -432,6 +457,10 @@ public sealed class DataContext : IdentityDbContext<AppUser, AppRole, int,
             .Property(x => x.AgeRatingMappings)
             .HasJsonConversion([]);
 
+        builder.Entity<MetadataSettings>()
+            .Property(x => x.ExternalAgeRatingMappings)
+            .HasJsonConversion([]);
+
         builder.Entity<SeriesMetadata>()
             .Property(b => b.WebLinks)
             .HasDefaultValue(string.Empty);
@@ -447,6 +476,21 @@ public sealed class DataContext : IdentityDbContext<AppUser, AppRole, int,
             .Property(x => x.Overrides)
             .HasJsonConversion([]);
 
+        builder.Entity<MetadataSettings>()
+            .Property(x => x.LibraryLanguageTitleOverrides)
+            .HasJsonConversion(new Dictionary<int, SeriesNameLanguage>())
+            .HasColumnType("TEXT")
+            .HasDefaultValue(new Dictionary<int, SeriesNameLanguage>());
+
+        // Defaults must match the property initializers on MetadataSettings, else existing installs (which take
+        // the column default) and fresh installs (which take the initializer) would ship different behaviour
+        builder.Entity<MetadataSettings>()
+            .Property(b => b.GlobalNameLanguages)
+            .HasDefaultValue("en");
+        builder.Entity<MetadataSettings>()
+            .Property(b => b.GlobalLocalizedNameLanguages)
+            .HasDefaultValue("ja-Latn");
+
         // Configure one-to-many relationship
         builder.Entity<MetadataSettings>()
             .HasMany(x => x.FieldMappings)
@@ -459,6 +503,9 @@ public sealed class DataContext : IdentityDbContext<AppUser, AppRole, int,
             .HasDefaultValue(true);
         builder.Entity<MetadataSettings>()
             .Property(b => b.EnableCoverImage)
+            .HasDefaultValue(true);
+        builder.Entity<MetadataSettings>()
+            .Property(b => b.EnableAgeRating)
             .HasDefaultValue(true);
 
         #endregion
@@ -498,8 +545,14 @@ public sealed class DataContext : IdentityDbContext<AppUser, AppRole, int,
         // Series indexes for search
         builder.Entity<Series>(entity =>
         {
-            entity.HasIndex(s => s.NormalizedName)
-                .HasDatabaseName("IX_Series_NormalizedName");
+            entity.HasIndex(s => new { s.LibraryId, s.Format, s.NormalizedName })
+                .HasDatabaseName("IX_Series_LibraryId_Format_NormalizedName");
+
+            entity.HasIndex(s => new { s.LibraryId, s.Format, s.NormalizedLocalizedName })
+                .HasDatabaseName("IX_Series_LibraryId_Format_NormalizedLocalizedName");
+
+            entity.HasIndex(s => new { s.LibraryId, s.Format, s.NormalizedOriginalName })
+                .HasDatabaseName("IX_Series_LibraryId_Format_NormalizedOriginalName");
 
             entity.HasIndex(s => s.LibraryId)
                 .HasDatabaseName("IX_Series_LibraryId");
@@ -540,6 +593,57 @@ public sealed class DataContext : IdentityDbContext<AppUser, AppRole, int,
         builder.Entity<AppUserReadingSessionActivityData>()
             .HasIndex(a => new { a.StartTimeUtc, a.LibraryId })
             .HasDatabaseName("IX_ActivityData_StartTimeUtc_LibraryId");
+
+        builder.Entity<KavitaPlusAuditLog>(entity =>
+        {
+            entity.HasIndex(e => new { e.Category, e.CreatedUtc })
+                .HasDatabaseName("IX_KavitaPlusAuditLog_Category_CreatedUtc");
+            entity.HasIndex(e => new { e.SeriesId, e.CreatedUtc })
+                .HasDatabaseName("IX_KavitaPlusAuditLog_SeriesId_CreatedUtc");
+            entity.HasIndex(e => new { e.SubjectType, e.SubjectId })
+                .HasDatabaseName("IX_KavitaPlusAuditLog_SubjectType_SubjectId");
+            entity.HasIndex(e => e.CreatedUtc)
+                .HasDatabaseName("IX_KavitaPlusAuditLog_CreatedUtc");
+            entity.HasIndex(e => e.UserId)
+                .HasDatabaseName("IX_KavitaPlusAuditLog_UserId");
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.ScrobbleError)
+                .WithMany()
+                .HasForeignKey(e => e.ScrobbleErrorId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<ScrobbleRuleHistory>(entity =>
+        {
+            // One delivered row per (user, provider, rule, series, chapter). ChapterId is null for series-based providers.
+            entity.HasIndex(e => new { e.AppUserId, e.Provider, e.RuleKind, e.SeriesId, e.ChapterId })
+                .IsUnique()
+                .HasDatabaseName("IX_ScrobbleRuleHistory_User_Provider_Rule_Series_Chapter");
+            // Reset/purge lookups by user + series
+            entity.HasIndex(e => new { e.AppUserId, e.SeriesId })
+                .HasDatabaseName("IX_ScrobbleRuleHistory_AppUserId_SeriesId");
+
+            entity.HasOne(e => e.AppUser)
+                .WithMany()
+                .HasForeignKey(e => e.AppUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Series)
+                .WithMany()
+                .HasForeignKey(e => e.SeriesId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Chapter)
+                .WithMany()
+                .HasForeignKey(e => e.ChapterId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // The event is reaped ~7 days after processing while this row must outlive it.
+            entity.HasOne(e => e.ScrobbleEvent)
+                .WithMany()
+                .HasForeignKey(e => e.ScrobbleEventId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
 
         #endregion
     }

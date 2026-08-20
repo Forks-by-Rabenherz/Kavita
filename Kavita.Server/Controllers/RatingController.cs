@@ -39,7 +39,7 @@ public class RatingController(
             return Ok();
         }
 
-        return BadRequest(await localizationService.Translate(UserId, "generic-error"));
+        return BadRequest(await localizationService.TranslateAsync(UserId, "generic-error"));
     }
 
     /// <summary>
@@ -62,13 +62,14 @@ public class RatingController(
             return Ok();
         }
 
-        return BadRequest(await localizationService.Translate(UserId, "generic-error"));
+        return BadRequest(await localizationService.TranslateAsync(UserId, "generic-error"));
     }
 
     /// <summary>
     /// Overall rating from all Kavita users for a given Series
     /// </summary>
     /// <param name="seriesId"></param>
+    /// <remarks>If the authenticated user is the only user to have rated the series, returns 0</remarks>
     /// <returns></returns>
     [SeriesAccess]
     [HttpGet("overall-series")]
@@ -77,8 +78,7 @@ public class RatingController(
         return Ok(new RatingDto()
         {
             Provider = ScrobbleProvider.Kavita,
-            AverageScore = await unitOfWork.SeriesRepository.GetAverageUserRating(seriesId, UserId),
-            FavoriteCount = 0,
+            AverageScore = await unitOfWork.SeriesRepository.GetAverageUserRatingAsync(seriesId, UserId)
         });
     }
 
@@ -86,6 +86,7 @@ public class RatingController(
     /// Overall rating from all Kavita users for a given Chapter
     /// </summary>
     /// <param name="chapterId"></param>
+    /// <remarks>If the authenticated user is the only user to have rated the chapter, returns 0</remarks>
     /// <returns></returns>
     [ChapterAccess]
     [HttpGet("overall-chapter")]
@@ -94,8 +95,7 @@ public class RatingController(
         return Ok(new RatingDto()
         {
             Provider = ScrobbleProvider.Kavita,
-            AverageScore = await unitOfWork.ChapterRepository.GetAverageUserRating(chapterId, UserId),
-            FavoriteCount = 0,
+            AverageScore = await unitOfWork.ChapterRepository.GetAverageUserRating(chapterId, UserId)
         });
     }
 }

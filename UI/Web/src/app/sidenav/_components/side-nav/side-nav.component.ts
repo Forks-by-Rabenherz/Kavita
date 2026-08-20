@@ -30,6 +30,7 @@ import {BreakpointService} from "../../../_services/breakpoint.service";
 import {ActionItem} from "../../../_models/actionables/action-item";
 import {Action} from "../../../_models/actionables/action";
 import {ActionResult} from "../../../_models/actionables/action-result";
+import {FilterUtilitiesService} from "../../../shared/_services/filter-utilities.service";
 
 @Component({
   selector: 'app-side-nav',
@@ -58,6 +59,7 @@ export class SideNavComponent {
   cachedData: SideNavStream[] | null = null;
   actions: ActionItem<Library>[] = this.actionFactoryService.getLibraryActions();
   homeActions: ActionItem<{}>[] = this.actionFactoryService.getSideNavHomeActions();
+  readingListActions: ActionItem<{}>[] = this.actionFactoryService.getSideNavReadingListActions();
 
   filterQuery: string = '';
   filterLibrary = (stream: SideNavStream) => {
@@ -68,7 +70,7 @@ export class SideNavComponent {
   totalSize = 0;
   isReadOnly = this.accountService.hasReadOnlyRole;
 
-  readonly hasValidLicense$ = toObservable(this.licenseService.hasValidLicense);
+  readonly hasValidLicense$ = toObservable(this.licenseService.hasActiveLicense);
 
   private showAllSubject = new BehaviorSubject<boolean>(false);
   showAll$ = this.showAllSubject.asObservable();
@@ -151,7 +153,7 @@ export class SideNavComponent {
 
     this.keyBindService.registerListener(
       this.destroyRef,
-      (e) => this.router.navigate(['/settings'], { fragment: SettingsTabId.Scrobbling}),
+      (e) => this.router.navigate(['/settings'], { fragment: SettingsTabId.MyActivity}),
       [KeyBindTarget.NavigateToScrobbling],
       {condition$: this.hasValidLicense$},
     );
@@ -167,6 +169,12 @@ export class SideNavComponent {
   performHomeAction(event: ActionItem<{}> | ActionResult<{}>) {
     if (event.action === Action.Edit) {
       this.showMore(true);
+    }
+  }
+  performReadingListAction(event: ActionItem<{}> | ActionResult<{}>) {
+    if (event.action === Action.Navigate) {
+      this.router.navigateByUrl('/settings#cbl-import');
+      return;
     }
   }
 
@@ -205,6 +213,10 @@ export class SideNavComponent {
     this.showAllSubject.next(false);
     this.editMode = false;
     this.cdRef.markForCheck();
+  }
+
+  getSmartFilterBaseLink(item: SideNavStream) {
+    return '/' + FilterUtilitiesService.getFilterLink(item.entityType, '');
   }
 
   async reorderDrop($event: CdkDragDrop<any, any, SideNavStream>) {

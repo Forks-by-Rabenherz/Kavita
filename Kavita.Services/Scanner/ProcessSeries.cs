@@ -4,7 +4,9 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Threading.Tasks;
+using Hangfire;
 using Kavita.API.Database;
 using Kavita.API.Repositories;
 using Kavita.API.Services;
@@ -22,6 +24,7 @@ using Kavita.Models.DTOs.KavitaPlus.Metadata;
 using Kavita.Models.DTOs.SignalR;
 using Kavita.Models.Entities;
 using Kavita.Models.Entities.Enums;
+using Kavita.Models.Entities.Enums.Audit;
 using Kavita.Models.Entities.Person;
 using Kavita.Models.Metadata;
 using Kavita.Models.Parser;
@@ -52,6 +55,8 @@ internal sealed record UpdateChapterComicInfoArgs
     public required Dictionary<string, Person> DatabasePeople { get; init; }
     public bool ForceUpdate { get; init; } = false;
 }
+
+internal sealed record TemporaryPerson(string Name, string NormalizedName);
 
 /// <summary>
 /// All code needed to Update a Series from a Scan action
@@ -116,13 +121,15 @@ public class ProcessSeries(
 
             // parsedInfos[0] is not the first volume or chapter. We need to find it using a ComicInfo check (as it uses firstParsedInfo for series sort)
             var firstParsedInfo = parsedInfos.FirstOrDefault(p => p.ComicInfo != null, firstInfo);
-            var databasePeople = await LoadAndCreateMissingChapterPeople(parsedInfos);
+            var databasePeople = await LoadAndCreateMissingChapterPeople(series, parsedInfos);
 
             await UpdateVolumes(databasePeople, settings, series, parsedInfos, args.ForceUpdate);
             series.Pages = series.Volumes.Sum(v => v.Pages);
 
             series.NormalizedName = series.Name.ToNormalized();
             series.OriginalName ??= firstParsedInfo.Series;
+            series.NormalizedOriginalName = series.OriginalName.ToNormalized();
+
             if (series.Format == MangaFormat.Unknown)
             {
                 series.Format = firstParsedInfo.Format;
@@ -147,9 +154,9 @@ public class ProcessSeries(
 
             // parsedInfos[0] is not the first volume or chapter. We need to find it
             var localizedSeries = parsedInfos.Select(p => p.LocalizedSeries).FirstOrDefault(p => !string.IsNullOrEmpty(p));
-            if (!series.LocalizedNameLocked && !string.IsNullOrEmpty(localizedSeries))
+            if (!series.LocalizedNameLocked)
             {
-                series.LocalizedName = localizedSeries;
+                series.LocalizedName = localizedSeries ?? string.Empty;
                 series.NormalizedLocalizedName = series.LocalizedName.ToNormalized();
             }
 
@@ -227,9 +234,15 @@ public class ProcessSeries(
             return null;
         }
 
-        if (seriesAdded)
+        if (seriesAdded && library.AllowMetadataMatching)
         {
-            await externalMetadataService.FetchSeriesMetadata(series.Id, series.Library.Type);
+            // I think we can spawn this in a background job? Do we need to enqueue on a specific queue?
+            // All changes to series after this should be page count etc
+            /*BackgroundJob.Enqueue<IExternalMetadataService>(s
+                => s.TryMatchAndLoadMetadataForSeries(series.Id, series.Library.Type, MetadataFetchTrigger.SeriesAdded));*/
+
+            await externalMetadataService.TryMatchAndLoadMetadataForSeries(series.Id, series.Library.Type,
+                MetadataFetchTrigger.SeriesAdded);
         }
 
         await eventHub.SendMessageAsync(MessageFactory.ScanSeries,
@@ -240,28 +253,79 @@ public class ProcessSeries(
 
     private async Task ReportDuplicateSeriesLookup(Library library, ParserInfo firstInfo, Exception ex)
     {
-        var seriesCollisions = await unitOfWork.SeriesRepository.GetAllSeriesByAnyName(firstInfo.LocalizedSeries, string.Empty, library.Id, firstInfo.Format);
+        // Re-run the same lookup args that GetFullSeriesByAnyName used so the report reflects the real collision set.
+        var seriesCollisions = await unitOfWork.SeriesRepository.GetAllSeriesByAnyNameAsync(
+            firstInfo.Series, firstInfo.LocalizedSeries, library.Id, firstInfo.Format);
 
-        seriesCollisions = seriesCollisions.Where(collision =>
-            collision.Name != firstInfo.Series || collision.LocalizedName != firstInfo.LocalizedSeries).ToList();
+        var normalizedSeries = firstInfo.Series.ToNormalized();
+        var normalizedLocalized = firstInfo.LocalizedSeries.ToNormalized();
 
-        if (seriesCollisions.Count > 1)
+        if (seriesCollisions.Count == 0)
         {
-            var firstCollision = seriesCollisions[0];
-            var secondCollision = seriesCollisions[1];
+            // The lookup threw but the collision can't be reproduced
+            logger.LogError(ex,
+                "[ScannerService] Series lookup for {SeriesName} (normalized: {NormalizedName}) in Library {LibraryName} returned multiple matches, but the collision could not be reproduced for reporting",
+                firstInfo.Series.Sanitize(), normalizedSeries.Sanitize(), library.Name.Sanitize());
+            return;
+        }
 
-            var tableRows = $"<tr><td>Name: {firstCollision.Name}</td><td>Name: {secondCollision.Name}</td></tr>" +
-                            $"<tr><td>Localized: {firstCollision.LocalizedName}</td><td>Localized: {secondCollision.LocalizedName}</td></tr>" +
-                            $"<tr><td>Filename: {Parser.NormalizePath(firstCollision.FolderPath)}</td><td>Filename: {Parser.NormalizePath(secondCollision.FolderPath)}</td></tr>";
+        var rows = string.Join(string.Empty, seriesCollisions.Select(collision =>
+        {
+            var matched = DescribeMatchedFields(collision, normalizedSeries, normalizedLocalized);
+            return "<tr>" +
+                   $"<td>{WebUtility.HtmlEncode(collision.Name)}</td>" +
+                   $"<td>{WebUtility.HtmlEncode(collision.LocalizedName)}</td>" +
+                   $"<td>{WebUtility.HtmlEncode(collision.OriginalName)}</td>" +
+                   $"<td>{WebUtility.HtmlEncode(Parser.NormalizePath(collision.FolderPath))}</td>" +
+                   $"<td>{WebUtility.HtmlEncode(matched)}</td>" +
+                   "</tr>";
+        }));
 
-            var htmlTable = $"<table class='table table-striped'><thead><tr><th>Series 1</th><th>Series 2</th></tr></thead><tbody>{string.Join(string.Empty, tableRows)}</tbody></table>";
+        var explanation =
+            $"<p>The folder parsed as series <strong>{WebUtility.HtmlEncode(firstInfo.Series)}</strong> " +
+            $"(normalized to <code>{WebUtility.HtmlEncode(normalizedSeries)}</code>) matches {seriesCollisions.Count} " +
+            $"existing series in library <strong>{WebUtility.HtmlEncode(library.Name)}</strong>. " +
+            "Kavita cannot tell which one to update, so this folder was skipped.</p>";
 
-            logger.LogError(ex, "[ScannerService] Scanner found a Series {SeriesName} which matched another Series {LocalizedName} in a different folder parallel to Library {LibraryName} root folder. This is not allowed. Please correct, scan will abort",
-                firstInfo.Series, firstInfo.LocalizedSeries, library.Name);
+        const string remedy = "<p>To fix this, make the series names unambiguous: rename one of the folders, set a distinct Series or " +
+                              "LocalizedSeries (e.g. via ComicInfo.xml), or lock the series name on the correct entry. Then rescan the library.</p>";
 
-            await eventHub.SendMessageAsync(MessageFactory.Error,
-                MessageFactory.ErrorEvent($"Library {library.Name} Series collision on {firstInfo.Series}",
-                    htmlTable));
+        var htmlTable =
+            "<table class='table table-striped'><thead><tr>" +
+            "<th>Name</th><th>Localized</th><th>Original</th><th>Folder</th><th>Matched On</th>" +
+            $"</tr></thead><tbody>{rows}</tbody></table>";
+
+        logger.LogError(ex,
+            "[ScannerService] Series {SeriesName} (normalized: {NormalizedName}) in Library {LibraryName} collides with {Count} existing series on the same normalized name. This folder was skipped; please disambiguate and rescan",
+            firstInfo.Series.Sanitize(), normalizedSeries.Sanitize(), library.Name.Sanitize(), seriesCollisions.Count);
+
+        await eventHub.SendMessageAsync(MessageFactory.Error,
+            MessageFactory.ErrorEvent($"Series collision on \"{firstInfo.Series}\" in library {library.Name}",
+                explanation + remedy + htmlTable));
+    }
+
+    /// <summary>
+    /// Describes which of a colliding series' normalized columns matched the parsed series/localized name, including
+    /// the normalized value that collided, so the user can see why Kavita treats the entries as the same series.
+    /// </summary>
+    private static string DescribeMatchedFields(Series collision, string normalizedSeries, string normalizedLocalized)
+    {
+        var matches = new List<string>();
+
+        Check("Name", collision.NormalizedName);
+        Check("Localized", collision.NormalizedLocalizedName);
+        Check("Original", collision.NormalizedOriginalName);
+
+        return matches.Count == 0 ? "(normalized variant)" : string.Join(", ", matches);
+
+        void Check(string columnLabel, string? normalizedValue)
+        {
+            if (string.IsNullOrEmpty(normalizedValue)) return;
+            if (normalizedValue == normalizedSeries ||
+                (!string.IsNullOrEmpty(normalizedLocalized) && normalizedValue == normalizedLocalized))
+            {
+                matches.Add($"{columnLabel} = \"{normalizedValue}\"");
+            }
         }
     }
 
@@ -337,9 +401,9 @@ public class ProcessSeries(
 
         DeterminePublicationStatus(series, chapters);
 
-        if (!string.IsNullOrEmpty(firstChapter?.Summary) && !series.Metadata.SummaryLocked)
+        if (!series.Metadata.SummaryLocked)
         {
-            series.Metadata.Summary = firstChapter.Summary;
+            series.Metadata.Summary = firstChapter?.Summary ?? string.Empty;
         }
 
         if (!series.Metadata.LanguageLocked)
@@ -356,10 +420,27 @@ public class ProcessSeries(
 
         if (!string.IsNullOrEmpty(firstChapter?.WebLinks) && library.InheritWebLinksFromFirstChapter)
         {
+            // TODO: Come back and clean this up, we call this code in DefaultParser AND ProcessSeries
             series.Metadata.WebLinks = firstChapter.WebLinks;
-            series.AniListId = WeblinkParser.GetAniListId(series.Metadata.WebLinks) ?? 0;
-            series.MalId = WeblinkParser.GetMalId(series.Metadata.WebLinks) ?? 0;
-            series.ComicVineId = WeblinkParser.GetComicVineId(series.Metadata.WebLinks).Item1;
+            var aniListId = ExternalIdParser.GetAniListId(series.Metadata.WebLinks);
+            if (aniListId.HasValue)
+                series.AniListId = aniListId.Value;
+
+            var malId = ExternalIdParser.GetMalId(series.Metadata.WebLinks);
+            if (malId.HasValue)
+                series.MalId = malId.Value;
+
+            var (comicVineId, _) = ExternalIdParser.GetComicVineId(series.Metadata.WebLinks);
+            if (comicVineId != null)
+                series.ComicVineId = comicVineId;
+
+            var mangaBakaId = ExternalIdParser.GetMangaBakaId(series.Metadata.WebLinks);
+            if (mangaBakaId > 0)
+                series.MangaBakaId = mangaBakaId;
+
+            var hardcoverId = ExternalIdParser.GetHardcoverSeriesId(series.Metadata.WebLinks);
+            if (hardcoverId > 0)
+                series.HardcoverId = hardcoverId;
         }
 
         if (!string.IsNullOrEmpty(firstChapter?.SeriesGroup) && library.ManageCollections)
@@ -369,7 +450,7 @@ public class ProcessSeries(
 
         #region PeopleAndTagsAndGenres
 
-        foreach (var personRole in Enum.GetValues<PersonRole>().Where(r => r != PersonRole.Other))
+        foreach (var personRole in Enum.GetValues<PersonRole>())
         {
             if (series.Metadata.IsPersonRoleLocked(personRole)) continue;
 
@@ -406,7 +487,7 @@ public class ProcessSeries(
     /// <returns></returns>
     private static bool ShouldUpdatePeopleForRole(Series series, List<ChapterPeople> chapterPeople, PersonRole role)
     {
-        if (chapterPeople.Count == 0) return false;
+        if (chapterPeople.Count == 0) return true;
 
         // If metadata already has this role, but all entries are from KavitaPlus, we should retain them
         if (series.Metadata.AnyOfRole(role))
@@ -470,7 +551,7 @@ public class ProcessSeries(
     }
 
 
-    private static void UpdateSeriesMetadataTags(ICollection<Tag> metadataTags, IList<Tag> chapterTags)
+    public static void UpdateSeriesMetadataTags(ICollection<Tag> metadataTags, IList<Tag> chapterTags)
     {
         // Create a HashSet of normalized titles for faster lookups
         var chapterTagTitles = new HashSet<string>(chapterTags.Select(t => t.NormalizedTitle));
@@ -498,7 +579,7 @@ public class ProcessSeries(
         }
     }
 
-    private static void UpdateSeriesMetadataGenres(ICollection<Genre> metadataGenres, IList<Genre> chapterGenres)
+    public static void UpdateSeriesMetadataGenres(ICollection<Genre> metadataGenres, IList<Genre> chapterGenres)
     {
         // Create a HashSet of normalized titles for chapterGenres for fast lookup
         var chapterGenreTitles = new HashSet<string>(chapterGenres.Select(g => g.NormalizedTitle));
@@ -614,7 +695,12 @@ public class ProcessSeries(
             volume.LookupName = volumeNumber;
             volume.Name = volume.GetNumberTitle();
 
-            var infos = parsedInfos.Where(p => p.Volumes == volumeNumber).ToArray();
+            var minNumber = Parser.MinNumberFromRange(volumeNumber);
+            var maxNumber = Parser.MaxNumberFromRange(volumeNumber);
+            var infos = parsedInfos
+                .Where(p => Parser.MinNumberFromRange(p.Volumes).Is(minNumber)
+                            && Parser.MaxNumberFromRange(p.Volumes).Is(maxNumber))
+                .ToArray();
 
             await UpdateChapters(new UpdateChapterArgs
             {
@@ -739,12 +825,30 @@ public class ProcessSeries(
             }
 
             // Try to patch in any External Metadata Ids we've seen during parsing
-            chapter.AniListId = info.AniListId ?? 0;
-            chapter.MalId = info.MalId ?? 0;
-            chapter.MangaBakaId = info.MangaBakaId ?? 0;
-            chapter.MetronId = info.MetronId ?? 0;
-            chapter.ComicVineId = info.ComicVineId;
-            chapter.HardcoverId = info.HardcoverId ?? 0;
+            if (info.AniListId is > 0)
+            {
+                chapter.AniListId = info.AniListId ?? 0;
+            }
+            if (info.MalId is > 0)
+            {
+                chapter.MalId = info.MalId ?? 0;
+            }
+            if (info.MangaBakaId is > 0)
+            {
+                chapter.MangaBakaId = info.MangaBakaId ?? 0;
+            }
+            if (info.MetronId is > 0)
+            {
+                chapter.MetronId = info.MetronId ?? 0;
+            }
+            if (!string.IsNullOrEmpty(info.ComicVineId))
+            {
+                chapter.ComicVineId = info.ComicVineId;
+            }
+            if (info.HardcoverId is > 0)
+            {
+                chapter.HardcoverId = info.HardcoverId ?? 0;
+            }
         }
 
         RemoveChapters(args.Volume, args.ParsedInfos);
@@ -854,57 +958,46 @@ public class ProcessSeries(
             chapter.AgeRating = ComicInfo.ConvertAgeRatingToEnum(comicInfo.AgeRating);
         }
 
-        if (!chapter.TitleNameLocked && !string.IsNullOrEmpty(comicInfo.Title))
+        if (!chapter.TitleNameLocked)
         {
             chapter.TitleName = comicInfo.Title.Trim();
         }
 
-        if (!chapter.SummaryLocked && !string.IsNullOrEmpty(comicInfo.Summary))
+        if (!chapter.SummaryLocked)
         {
             chapter.Summary = comicInfo.Summary;
         }
 
-        if (!chapter.LanguageLocked && !string.IsNullOrEmpty(comicInfo.LanguageISO))
+        if (!chapter.LanguageLocked)
         {
             chapter.Language = comicInfo.LanguageISO;
         }
 
-        if (!string.IsNullOrEmpty(comicInfo.SeriesGroup))
-        {
-            chapter.SeriesGroup = comicInfo.SeriesGroup;
-        }
+        chapter.SeriesGroup = comicInfo.SeriesGroup;
+        chapter.StoryArc = comicInfo.StoryArc;
+        chapter.AlternateSeries = comicInfo.AlternateSeries;
+        chapter.AlternateNumber = comicInfo.AlternateNumber;
+        chapter.StoryArcNumber = comicInfo.StoryArcNumber;
+        chapter.AlternateCount = comicInfo.AlternateCount;
 
-        if (!string.IsNullOrEmpty(comicInfo.StoryArc))
-        {
-            chapter.StoryArc = comicInfo.StoryArc;
-        }
-
-        if (!string.IsNullOrEmpty(comicInfo.AlternateSeries))
-        {
-            chapter.AlternateSeries = comicInfo.AlternateSeries;
-        }
-
-        if (!string.IsNullOrEmpty(comicInfo.AlternateNumber))
-        {
-            chapter.AlternateNumber = comicInfo.AlternateNumber;
-        }
-
-        if (!string.IsNullOrEmpty(comicInfo.StoryArcNumber))
-        {
-            chapter.StoryArcNumber = comicInfo.StoryArcNumber;
-        }
-
-        if (comicInfo.AlternateCount > 0)
-        {
-            chapter.AlternateCount = comicInfo.AlternateCount;
-        }
 
         if (!string.IsNullOrEmpty(comicInfo.Web))
         {
-            chapter.WebLinks = string.Join(",", comicInfo.Web.SplitBy(','));
+            if (comicInfo.Web.Contains(','))
+            {
+                chapter.WebLinks = string.Join(",", comicInfo.Web.SplitBy(','));
+            }
+            else
+            {
+                chapter.WebLinks = string.Join(",", comicInfo.Web.SplitBy(' '));
+            }
+        }
+        else
+        {
+            chapter.WebLinks = string.Empty;
         }
 
-        if (!chapter.ISBNLocked && !string.IsNullOrEmpty(comicInfo.Isbn))
+        if (!chapter.ISBNLocked)
         {
             chapter.ISBN = comicInfo.Isbn;
         }
@@ -916,7 +1009,7 @@ public class ProcessSeries(
             chapter.ReleaseDate = new DateTime(comicInfo.Year, month, day);
         }
 
-        foreach (var personRole in Enum.GetValues<PersonRole>().Where(r => r != PersonRole.Other))
+        foreach (var personRole in Enum.GetValues<PersonRole>())
         {
             if (chapter.IsPersonRoleLocked(personRole)) continue;
 
@@ -954,7 +1047,7 @@ public class ProcessSeries(
     {
         try
         {
-            await GenreHelper.UpdateChapterGenres(chapter, genreNames, unitOfWork);
+            await TagHelper.UpdateEntityTags(chapter.Genres, genreNames, unitOfWork.DataContext.Genre, unitOfWork);
         }
         catch (Exception ex)
         {
@@ -966,7 +1059,7 @@ public class ProcessSeries(
     {
         try
         {
-            await TagHelper.UpdateChapterTags(chapter, tagNames, unitOfWork);
+            await TagHelper.UpdateEntityTags(chapter.Tags, tagNames, unitOfWork.DataContext.Tag, unitOfWork);
         }
         catch (Exception ex)
         {
@@ -974,23 +1067,32 @@ public class ProcessSeries(
         }
     }
 
-    private async Task<Dictionary<string, Person>> LoadAndCreateMissingChapterPeople(IList<ParserInfo> parserInfos)
+    private async Task<Dictionary<string, Person>> LoadAndCreateMissingChapterPeople(Series series, IList<ParserInfo> parserInfos)
     {
         var comicInfos = parserInfos.Select(pi => pi.ComicInfo).WhereNotNull().ToList();
 
+        // We must ensure existing people are loaded as well. As a Chapter (entity) can have people locked, but a person
+        // removed from the ComicInfo. Which would later not be present in the dictionary
+        var existingPeople = series.Volumes
+            .SelectMany(v => v.Chapters
+                .SelectMany(c => c.People)
+                .Select(cp => cp.Person)
+                .Select(p => new TemporaryPerson(p.Name, p.NormalizedName)));
+
         var allPeople = Enum.GetValues<PersonRole>()
             .SelectMany(role => comicInfos.SelectMany(ci => ci.GetPeopleForRole(role)))
-            .Select(person => new {Name = person, NormalizaedName = person.ToNormalized()})
-            .DistinctBy(person => person.NormalizaedName)
+            .Select(person => new TemporaryPerson(person, person.ToNormalized()))
+            .Concat(existingPeople)
+            .DistinctBy(person => person.NormalizedName)
             .ToList();
 
-        var normalizedNames = allPeople.Select(p => p.NormalizaedName).ToList();
+        var normalizedNames = allPeople.Select(p => p.NormalizedName).ToList();
 
         var peopleInDatabase = await unitOfWork.PersonRepository.GetPeopleByNames(normalizedNames);
         var existingPeopleDict = PersonHelper.ConstructNameAndAliasDictionary(peopleInDatabase);
 
         var peopleToAdd = allPeople
-            .Where(p => !existingPeopleDict.ContainsKey(p.NormalizaedName))
+            .Where(p => !existingPeopleDict.ContainsKey(p.NormalizedName))
             .Select(p => new PersonBuilder(p.Name).Build())
             .ToList();
 

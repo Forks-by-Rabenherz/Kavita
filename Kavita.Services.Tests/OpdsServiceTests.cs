@@ -10,11 +10,13 @@ using Kavita.API.Services.Plus;
 using Kavita.API.Services.Reading;
 using Kavita.API.Services.ReadingLists;
 using Kavita.API.Services.SignalR;
+using Kavita.API.Store;
 using Kavita.Common.Helpers;
 using Kavita.Database;
 using Kavita.Database.Tests;
 using Kavita.Models.Builders;
 using Kavita.Models.Constants;
+using Kavita.Models.DTOs.Filtering.v2;
 using Kavita.Models.DTOs.OPDS;
 using Kavita.Models.DTOs.OPDS.Requests;
 using Kavita.Models.DTOs.Progress;
@@ -48,11 +50,11 @@ public class OpdsServiceTests(ITestOutputHelper testOutputHelper) : AbstractDbTe
         var readerService = new ReaderService(unitOfWork, Substitute.For<ILogger<ReaderService>>(),
             Substitute.For<IEventHub>(), Substitute.For<IImageService>(), ds,
             Substitute.For<IScrobblingService>(), Substitute.For<IReadingSessionService>(),
-            Substitute.For<IClientInfoAccessor>(), Substitute.For<ISeriesService>(), Substitute.For<IEntityNamingService>(),
+            Substitute.For<IClientInfoAccessor>(), Substitute.For<IEntityNamingService>(),
             Substitute.For<ILocalizationService>(), Substitute.For<IBookService>());
 
         var localizationService =
-            new LocalizationService(ds, new MockHostingEnvironment(), Substitute.For<IMemoryCache>(), unitOfWork);
+            new LocalizationService(ds, new MockHostingEnvironment(), Substitute.For<IMemoryCache>(), unitOfWork, Substitute.For<IUserContext>());
 
         var namingService = new EntityNamingService();
 
@@ -187,12 +189,13 @@ public class OpdsServiceTests(ITestOutputHelper testOutputHelper) : AbstractDbTe
         return readingList;
     }
 
-    private static async Task<AppUserSmartFilter> CreateSmartFilter(DataContext context, int userId, string name, string filter)
+    private static async Task<AppUserSmartFilter> CreateSmartFilter(DataContext context, int userId, string name, string filter, FilterEntityType entityType = FilterEntityType.Series)
     {
         var smartFilter = new AppUserSmartFilter
         {
             Name = name,
             Filter = filter,
+            EntityType = entityType,
             AppUserId = userId
         };
 
@@ -787,44 +790,6 @@ public class OpdsServiceTests(ITestOutputHelper testOutputHelper) : AbstractDbTe
         ValidatePaginationLinks(feed2, OpdsService.FirstPageNumber + 1, expectNext: false, expectPrev: true);
     }
 
-    [Fact]
-    public async Task GetMoreInGenre_WithPagination()
-    {
-        var (unitOfWork, context, mapper) = await CreateDatabase();
-        var (opdsService, _) = SetupService(unitOfWork, mapper);
-        var user = await SetupSeriesAndUser(context, unitOfWork, OpdsService.PageSize + 5);
-
-        // Add genre to all series
-        var genre = new GenreBuilder("Action").Build();
-        context.Genre.Add(genre);
-        await context.SaveChangesAsync();
-
-        for (var i = 1; i <= OpdsService.PageSize + 5; i++)
-        {
-            var series = await unitOfWork.SeriesRepository.GetSeriesByIdAsync(i);
-            if (series?.Metadata != null)
-            {
-                series.Metadata.Genres.Add(genre);
-            }
-        }
-        await unitOfWork.CommitAsync();
-
-        // Test page 1
-        var feed = await opdsService.GetMoreInGenre(new OpdsItemsFromEntityIdRequest
-        {
-            ApiKey = user.GetOpdsAuthKey(),
-            Prefix = OpdsService.DefaultApiPrefix,
-            BaseUrl = string.Empty,
-            UserId = user.Id,
-            Preferences = await unitOfWork.UserRepository.GetOpdsPreferences(user.Id),
-            EntityId = genre.Id,
-            PageNumber = OpdsService.FirstPageNumber
-        });
-
-        Assert.Equal(OpdsService.PageSize, feed.Entries.Count);
-        ValidatePaginationLinks(feed, OpdsService.FirstPageNumber, expectNext: true, expectPrev: false);
-    }
-
     #endregion
 
     #region Detail Feeds
@@ -840,7 +805,7 @@ public class OpdsServiceTests(ITestOutputHelper testOutputHelper) : AbstractDbTe
         var smartFilter = await CreateSmartFilter(context, user.Id, "Test Filter", "combination=0");
 
         // Test page 1
-        var feed = await opdsService.GetSeriesFromSmartFilter(new OpdsItemsFromEntityIdRequest
+        var feed = await opdsService.ResolveSmartFilter(new OpdsItemsFromEntityIdRequest
         {
             ApiKey = user.GetOpdsAuthKey(),
             Prefix = OpdsService.DefaultApiPrefix,
@@ -1083,6 +1048,81 @@ public class OpdsServiceTests(ITestOutputHelper testOutputHelper) : AbstractDbTe
 
         Assert.NotEmpty(feed.Entries);
         Assert.Single(feed.Entries); // Each chapter has 1 file
+    }
+
+    [Fact]
+    public async Task PageStreamLink_p5count_ReflectsChapterTotalPagesForMultiFileChapter()
+    {
+        // Issue #4382: for a chapter composed of multiple MangaFiles, the OPDS-PSE
+        // stream link's p5:count must equal chapter.Pages (the total across all files),
+        // not Files.First().Pages — otherwise spec-compliant clients (Panels) stop
+        // streaming halfway through the chapter.
+        var (unitOfWork, context, mapper) = await CreateDatabase();
+        var (opdsService, _) = SetupService(unitOfWork, mapper);
+
+        var library = new LibraryBuilder("Test Lib").Build();
+        unitOfWork.LibraryRepository.Add(library);
+        await unitOfWork.CommitAsync();
+
+        context.AppUser.Add(new AppUserBuilder("majora2007", "majora2007")
+            .WithLibrary(library)
+            .WithLocale("en")
+            .WithRole(PolicyConstants.AdminRole)
+            .Build());
+        await context.SaveChangesAsync();
+
+        // chapter total = 45, but the first file is only 10 pages.
+        var series = new SeriesBuilder("MultiFile Test")
+            .WithVolume(new VolumeBuilder(Parser.LooseLeafVolume)
+                .WithChapter(new ChapterBuilder("1")
+                    .WithSortOrder(0)
+                    .WithPages(45)
+                    .WithFile(new MangaFileBuilder(_testFilePath, MangaFormat.Archive, 10).Build())
+                    .WithFile(new MangaFileBuilder(_testFilePath, MangaFormat.Archive, 15).Build())
+                    .WithFile(new MangaFileBuilder(_testFilePath, MangaFormat.Archive, 20).Build())
+                    .Build())
+                .Build())
+            .Build();
+        series.Library = library;
+        context.Series.Add(series);
+        await unitOfWork.CommitAsync();
+
+        var user = await unitOfWork.UserRepository.GetUserByIdAsync(1,
+            AppUserIncludes.Progress | AppUserIncludes.WantToRead | AppUserIncludes.Collections);
+        Assert.NotNull(user);
+        user.SideNavStreams = new List<AppUserSideNavStream>
+        {
+            new AppUserSideNavStream
+            {
+                Name = library.Name,
+                IsProvided = true,
+                Order = 0,
+                StreamType = SideNavStreamType.Library,
+                Visible = true,
+                LibraryId = library.Id,
+                AppUserId = user.Id
+            }
+        };
+        await unitOfWork.CommitAsync();
+
+        var feed = await opdsService.GetSeriesDetail(new OpdsItemsFromEntityIdRequest
+        {
+            ApiKey = user.GetOpdsAuthKey(),
+            Prefix = OpdsService.DefaultApiPrefix,
+            BaseUrl = string.Empty,
+            UserId = user.Id,
+            Preferences = await unitOfWork.UserRepository.GetOpdsPreferences(user.Id),
+            EntityId = 1,
+            PageNumber = OpdsService.FirstPageNumber
+        });
+
+        Assert.NotEmpty(feed.Entries);
+        var streamLink = feed.Entries
+            .First()
+            .Links
+            .SingleOrDefault(l => l.Rel == FeedLinkRelation.Stream);
+        Assert.NotNull(streamLink);
+        Assert.Equal(45, streamLink.TotalPages); // pre-fix this would be 10 (Files.First().Pages)
     }
 
     #endregion

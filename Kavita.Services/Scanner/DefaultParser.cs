@@ -153,22 +153,27 @@ public abstract class DefaultParser(IDirectoryService directoryService) : IDefau
     /// for different metadata Ids
     /// </summary>
     /// <param name="info"></param>
-    protected static void ParseExternalIdsFromNotesAndWeblinks(ParserInfo info)
+    public static void ParseExternalIdsFromNotesAndWeblinks(ParserInfo info)
     {
         var notes = info.ComicInfo?.Notes;
         var weblinks = info.ComicInfo?.Web;
 
-        info.AniListId = WeblinkParser.GetAniListId(weblinks);
-        info.MalId = WeblinkParser.GetMalId(weblinks);
+        info.AniListId = ExternalIdParser.GetAniListId(weblinks);
+        info.MalId = ExternalIdParser.GetMalId(weblinks);
+        info.MangaBakaId = ExternalIdParser.GetMangaBakaId(weblinks);
+        info.HardcoverId = ExternalIdParser.GetHardcoverBookId(weblinks);
 
         var comicvineId = Parser.ParseComicVineIdFromComicInfoNote(notes);
-        var parsedCvWeblink = WeblinkParser.GetComicVineId(weblinks);
-        info.ComicVineId = !string.IsNullOrEmpty(comicvineId)
-            ? comicvineId
-            : parsedCvWeblink.Item1;
+        var parsedCvWeblink = ExternalIdParser.GetComicVineId(weblinks);
+        info.ComicVineId = comicvineId;
+
+        // If we have a seriesId, set it. Otherwise, we set the issue id
         if (parsedCvWeblink.Item2)
         {
             info.ComicVineSeriesId = parsedCvWeblink.Item1;
+        } else if (string.IsNullOrEmpty(comicvineId))
+        {
+            info.ComicVineId ??= parsedCvWeblink.Item1;
         }
 
         var metronId = Parser.ParseMetronIdFromComicInfoNote(notes);

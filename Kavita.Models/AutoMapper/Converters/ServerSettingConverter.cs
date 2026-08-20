@@ -30,6 +30,9 @@ public class ServerSettingConverter : ITypeConverter<IEnumerable<ServerSetting>,
                 case ServerSettingKey.TaskCleanup:
                     destination.TaskCleanup = row.Value;
                     break;
+                case ServerSettingKey.TaskCblSync:
+                    destination.TaskCblSync = row.Value;
+                    break;
                 case ServerSettingKey.LoggingLevel:
                     destination.LoggingLevel = row.Value;
                     break;
@@ -139,10 +142,6 @@ public class ServerSettingConverter : ITypeConverter<IEnumerable<ServerSetting>,
                     destination.OidcConfig = JsonSerializer.Deserialize<OidcConfigDto>(row.Value)!;
                     break;
                 case ServerSettingKey.LicenseKey:
-                case ServerSettingKey.EnableAuthentication:
-                case ServerSettingKey.EmailServiceUrl:
-                case ServerSettingKey.ConvertBookmarkToWebP:
-                case ServerSettingKey.ConvertCoverToWebP:
                 default:
                     break;
             }

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Kavita.Common.Helpers;
 using Kavita.Models.DTOs.ReadingLists;
+using Kavita.Models.DTOs.ReadingLists.Request;
 using Kavita.Models.Entities;
 using Kavita.Models.Entities.Enums;
 using Kavita.Models.Entities.ReadingLists;
@@ -29,7 +30,20 @@ public interface IReadingListService
     /// <param name="library"></param>
     /// <returns></returns>
     Task CreateReadingListsFromSeries(Series series, Library library);
-    Task<string> GenerateReadingListCoverImage(int readingListId);
+    /// <inheritdoc cref="GenerateReadingListCoverImage(ReadingList)"/>
+    /// <returns></returns>
+    Task<string> GenerateReadingListCoverImage(int readingListId, bool commit = false);
+    /// <summary>
+    /// Generates a merged cover image for the reading list, saves it to the covers directory,
+    /// and updates the entity's CoverImage and ColorScape.
+    /// </summary>
+    /// <remarks>Does not commit changes</remarks>
+    Task<string> GenerateReadingListCoverImage(ReadingList readingList);
+    /// <summary>
+    /// Generates a cover image for the reading list if it has more than 3 items and doesn't already have a locked/set cover.
+    /// </summary>
+    /// <remarks>Commits changes if a cover was generated</remarks>
+    Task UpdateReadingListCoverImage(ReadingList readingList);
     /// <summary>
     /// Check, and update if needed, all reading lists' AgeRating who contain the passed series
     /// </summary>

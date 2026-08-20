@@ -1,12 +1,12 @@
 import {HttpClient} from '@angular/common/http';
-import {computed, DestroyRef, inject, Injectable, signal} from '@angular/core';
+import {computed, DestroyRef, effect, inject, Injectable, signal} from '@angular/core';
 import {Series} from 'src/app/_models/series';
 import {environment} from 'src/environments/environment';
 import {ConfirmService} from '../confirm.service';
 import {Chapter} from 'src/app/_models/chapter';
 import {Volume} from 'src/app/_models/volume';
 import {asyncScheduler, filter, firstValueFrom, forkJoin, of, tap} from 'rxjs';
-import {download} from '../_models/download';
+import {download, parseContentDisposition} from '../_models/download';
 import {PageBookmark} from 'src/app/_models/readers/page-bookmark';
 import {map, switchMap, throttleTime} from 'rxjs/operators';
 import {AccountService} from 'src/app/_services/account.service';
@@ -28,14 +28,16 @@ import {
 } from '../_models/download-queue-item';
 import {DownloadStorageService} from './download-storage.service';
 import {normalizeTimestamp} from "../../../libs/download-timestamp";
-import {ReadingList, ReadingListItem} from "../../_models/reading-list";
+import {ReadingList, ReadingListItem} from "../../_models/reading-list/reading-list";
 import {ReadingListService} from "../../_services/reading-list.service";
 import {UserCollection} from "../../_models/collection-tag";
-import {FilterField} from "../../_models/metadata/v2/filter-field";
+import {SeriesFilterField} from "../../_models/metadata/v2/series-filter-field";
 import {FilterComparison} from "../../_models/metadata/v2/filter-comparison";
 import {FilterCombination} from "../../_models/metadata/v2/filter-combination";
 import {EntityTitleService} from "../../_services/entity-title.service";
 import {LibraryService} from "../../_services/library.service";
+import NoSleep from "nosleep.js";
+import {FilterEntityType} from "../../_models/metadata/v2/filter-entity-type";
 
 export const DEBOUNCE_TIME = 100;
 
@@ -65,6 +67,7 @@ export class DownloadService {
 
   private readonly SERIES_NAME_CACHE_MAX = 50;
   private _seriesNameCache = new Map<number, string>();
+  private noSleep: NoSleep = new NoSleep();
 
   private baseUrl = environment.apiUrl;
   /**
@@ -183,6 +186,16 @@ export class DownloadService {
       takeUntilDestroyed(this.destroyRef)
     ).subscribe();
 
+    //
+    effect(() => {
+      const hasActiveDownloads = this.hasActiveDownloads();
+      if (hasActiveDownloads) {
+        this.noSleep.enable().catch(err => console.error(err));
+        return;
+      }
+
+      this.noSleep.disable();
+    });
   }
 
   /**
@@ -544,7 +557,7 @@ export class DownloadService {
     ).pipe(
       tap((response) => {
         const disposition = response.headers.get('Content-Disposition') ?? '';
-        const filename = this.parseContentDisposition(disposition, `${readingListName}.${asV2 ? 'json' : 'cbl'}`);
+        const filename = parseContentDisposition(disposition, `${readingListName}.${asV2 ? 'json' : 'cbl'}`);
         const url = URL.createObjectURL(response.body!);
         const a = document.createElement('a');
         a.href = url;
@@ -615,9 +628,10 @@ export class DownloadService {
 
     // A collection is just a set of series, so we can just call down
     this.seriesService.getAllSeriesV2(0, 0, {
-      statements: [{field: FilterField.CollectionTags, value: collection.id + '', comparison: FilterComparison.Equal}],
+      statements: [{field: SeriesFilterField.CollectionTags, value: collection.id + '', comparison: FilterComparison.Equal}],
       combination: FilterCombination.And,
-      limitTo: 0
+      limitTo: 0,
+      entityType: FilterEntityType.Series
     }).subscribe(collectionSeries => {
 
 
@@ -956,7 +970,7 @@ export class DownloadService {
       if (!response.body) throw new Error('No response body');
 
       const contentLength = +(response.headers.get('Content-Length') || 0);
-      const filename = this.parseContentDisposition(response.headers.get('Content-Disposition') || '', item.downloadName);
+      const filename = parseContentDisposition(response.headers.get('Content-Disposition') || '', item.downloadName);
 
       this.setStatus(item.id, 'downloading');
 
@@ -1031,31 +1045,6 @@ export class DownloadService {
       } else {
         this.markFailed(item.id, err.message || 'Download failed');
       }
-    }
-  }
-
-  /**
-   * Parse Content-Disposition header to extract filename, with fallback.
-   */
-  private parseContentDisposition(header: string, fallbackName: string): string {
-    if (!header) return fallbackName || 'download';
-    const tokens = header.split(';');
-
-    if (tokens.length < 2) return fallbackName || 'download';
-
-    let filename = tokens[1].replace('filename=', '').replace(/"/ig, '').trim();
-
-    if (filename.startsWith('download_') || filename.startsWith('kavita_download_')) {
-      const ext = filename.substring(filename.lastIndexOf('.'), filename.length);
-      if (fallbackName) return fallbackName + ext;
-
-      return filename.replace('kavita_', '').replace('download_', '');
-    }
-
-    try {
-      return decodeURIComponent(filename) || fallbackName || 'download';
-    } catch {
-      return filename || fallbackName || 'download';
     }
   }
 

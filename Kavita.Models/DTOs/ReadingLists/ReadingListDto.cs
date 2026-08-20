@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Collections.Generic;
 using Kavita.Models.Entities.Enums;
 using Kavita.Models.Entities.Enums.ReadingList;
 using Kavita.Models.Entities.Interfaces;
+using System.ComponentModel.DataAnnotations;
 
 namespace Kavita.Models.DTOs.ReadingLists;
 #nullable enable
@@ -9,8 +11,8 @@ namespace Kavita.Models.DTOs.ReadingLists;
 public sealed record ReadingListDto : IHasCoverImage
 {
     public int Id { get; init; }
-    public string Title { get; set; } = default!;
-    public string Summary { get; set; } = default!;
+    public string Title { get; set; } = null!;
+    public string Summary { get; set; } = null!;
     /// <summary>
     /// Reading lists that are promoted are only done by admins
     /// </summary>
@@ -48,6 +50,7 @@ public sealed record ReadingListDto : IHasCoverImage
     /// <summary>
     /// The highest age rating from all Series within the reading list
     /// </summary>
+    [EnumDataType(typeof(AgeRating))]
     public required AgeRating AgeRating { get; set; } = AgeRating.Unknown;
 
     /// <summary>
@@ -75,6 +78,7 @@ public sealed record ReadingListDto : IHasCoverImage
     /// <summary>
     /// Determines how the list was created and if it's syncable.
     /// </summary>
+    [EnumDataType(typeof(ReadingListProvider))]
     public ReadingListProvider Provider { get; set; } = ReadingListProvider.None;
     /// <summary>
     /// When we last checked the remote for changes (compared SHA). This can happen
@@ -86,9 +90,13 @@ public sealed record ReadingListDto : IHasCoverImage
     /// Only updated when ShaHash changes and we pull new content.
     /// </summary>
     public DateTime? LastSyncedUtc { get; set; }
+    /// <summary>
+    /// Total items at CBL Import, this helps track missing items. CBL Sync will update to the latest.
+    /// </summary>
+    public int TotalItemsAtImport { get; set; }
+    public List<ReadingListTagDto> Tags { get; set; }
 
-    public bool CanSync => Provider == ReadingListProvider.Url
-                           && !string.IsNullOrEmpty(SourcePath);
+    public bool CanSync { get; set; }
     /// <summary>
     /// Checks if the remote SHA differs from our stored hash.
     /// </summary>

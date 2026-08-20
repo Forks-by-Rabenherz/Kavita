@@ -28,8 +28,12 @@ import {
   NgbNavItem,
   NgbNavLink,
   NgbNavOutlet,
+  NgbPopover,
   NgbTooltip
 } from '@ng-bootstrap/ng-bootstrap';
+import {DrawerService} from '../../../_services/drawer.service';
+import {KavitaplusDrawerComponent} from '../kavitaplus-drawer/kavitaplus-drawer.component';
+import {KavitaplusTooltipComponent} from '../kavitaplus-tooltip/kavitaplus-tooltip.component';
 import {ToastrService} from 'ngx-toastr';
 import {catchError, debounceTime, EMPTY, of, ReplaySubject, tap} from 'rxjs';
 import {BulkSelectionService} from 'src/app/cards/bulk-selection.service';
@@ -39,7 +43,7 @@ import {Chapter, LooseLeafOrDefaultNumber, SpecialVolumeNumber} from 'src/app/_m
 import {ScanSeriesEvent} from 'src/app/_models/events/scan-series-event';
 import {SeriesRemovedEvent} from 'src/app/_models/events/series-removed-event';
 import {LibraryType} from 'src/app/_models/library/library';
-import {ReadingList} from 'src/app/_models/reading-list';
+import {ReadingList} from 'src/app/_models/reading-list/reading-list';
 import {Series} from 'src/app/_models/series';
 import {RelatedSeries} from 'src/app/_models/series-detail/related-series';
 import {RelationKind} from 'src/app/_models/series-detail/relation-kind';
@@ -69,10 +73,10 @@ import {NextExpectedCardComponent} from "../../../cards/next-expected-card/next-
 import {MetadataService} from "../../../_services/metadata.service";
 import {Rating} from "../../../_models/rating";
 import {ThemeService} from "../../../_services/theme.service";
-import {DetailsTabComponent} from "../../../_single-module/details-tab/details-tab.component";
+import {BasicMetadataInfo, DetailsTabComponent} from "../../../_single-module/details-tab/details-tab.component";
 import {ChapterRemovedEvent} from "../../../_models/events/chapter-removed-event";
 import {SettingsTabId} from "../../../sidenav/preference-nav/preference-nav.component";
-import {FilterField} from "../../../_models/metadata/v2/filter-field";
+import {SeriesFilterField} from "../../../_models/metadata/v2/series-filter-field";
 import {AgeRating} from "../../../_models/metadata/age-rating";
 import {DefaultValuePipe} from "../../../_pipes/default-value.pipe";
 import {ExternalRatingComponent} from "../external-rating/external-rating.component";
@@ -116,6 +120,7 @@ import {patchEntitySignal, patchSignalArray} from "../../../../libs/patch";
 import {ModalService} from "../../../_services/modal.service";
 import {getResolvedData, getWritableResolvedData} from "../../../../libs/route-util";
 import {ExternalSeries} from "../../../_models/series-detail/external-series";
+import {RecommendedSeries} from "../../../_models/series-detail/recommended-series";
 import {Tabs} from "../../../_models/tabs";
 import {TabTitlePipe} from "../../../_pipes/tab-title.pipe";
 import {EntityTitleService} from "../../../_services/entity-title.service";
@@ -123,12 +128,17 @@ import {ReadingHistoryItem} from "src/app/_models/stats/reading-history-item";
 import {StatisticsService} from "src/app/_services/statistics.service";
 import {Pagination} from "src/app/_models/pagination";
 import {ReadingHistoryViewerComponent} from "src/app/shared/reading-history-viewer/reading-history-viewer.component";
+import {SeriesUpdateEvent} from "../../../_models/events/series-update-event";
+import {finalize} from "rxjs/operators";
+import {ExternalMetadataUpdateEvent} from "../../../_models/events/external-metadata-update-event";
 
 interface StoryLineItem {
   chapter?: ChapterCardEntity;
   volume?: VolumeCardEntity;
   isChapter: boolean;
 }
+
+const READING_HISTORY_PAGE_SIZE = 10;
 
 @Component({
   selector: 'app-series-detail',
@@ -138,7 +148,7 @@ interface StoryLineItem {
   imports: [CardActionablesComponent, ReactiveFormsModule, NgStyle,
     NgbTooltip, NgbDropdown, NgbDropdownToggle, NgbDropdownMenu,
     NgbDropdownItem, BulkOperationsComponent,
-    NgbNav, NgbNavItem, NgbNavLink, NgbNavContent, VirtualScrollerModule, SeriesCardComponent, ExternalSeriesCardComponent, NgbNavOutlet,
+    NgbNav, NgbNavItem, NgbNavLink, NgbNavContent, VirtualScrollerModule, SeriesCardComponent, ExternalSeriesCardComponent, NgbNavOutlet, NgbPopover, KavitaplusTooltipComponent,
     TranslocoDirective, NgTemplateOutlet, NextExpectedCardComponent,
     NgClass, DetailsTabComponent, DefaultValuePipe, ExternalRatingComponent, ReadMoreComponent, RouterLink, BadgeExpanderComponent,
     PublicationStatusPipe, MetadataDetailRowComponent, DownloadButtonComponent, RelatedTabComponent, CoverImageComponent, ReviewsComponent,
@@ -178,6 +188,7 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
   protected readonly breakpointService = inject(BreakpointService);
   private readonly entityTitleService = inject(EntityTitleService);
   private readonly statisticsService = inject(StatisticsService);
+  private readonly drawerService = inject(DrawerService);
 
   readonly scrollingBlock = viewChild<ElementRef<HTMLDivElement>>('scrollingBlock');
 
@@ -231,15 +242,13 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
     return items;
   });
 
-  protected readingHistory = signal<ReadingHistoryItem[]>([]);
-  protected hasReadingHistory = computed(() => this.readingHistory().length > 0);
-  protected readingHistoryPagination = signal<Pagination | null>(null);
-  protected isLoadingReadingHistory = signal(false);
-  protected readingHistoryCurrentPage = signal(1);
+  protected readonly readingHistory = signal<ReadingHistoryItem[]>([]);
+  protected readonly hasReadingHistory = computed(() => this.readingHistory().length > 0);
+  protected readonly readingHistoryPagination = signal<Pagination | null>(null);
+  protected readonly isLoadingReadingHistory = signal(false);
+  protected readonly readingHistoryCurrentPage = signal(1);
 
-  isAdmin = computed(() => {
-    return this.accountService.hasAdminRole();
-  });
+  readonly isAdmin = this.accountService.hasAdminRole;
 
   activeTabId = Tabs.Storyline;
   mobileSeriesImgBackground = this.themeService.getCssVariable('--mobile-series-img-background');
@@ -250,7 +259,7 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
 
   libraryAllowsScrobbling  = signal<boolean>(false);
   isScrobbling = signal<boolean>(true);
-  showScrobbleControls = computed(() => this.licenseService.hasValidLicense() && this.libraryAllowsScrobbling());
+  showScrobbleControls = computed(() => this.licenseService.hasActiveLicense() && this.libraryAllowsScrobbling());
 
   currentlyReadingChapter = signal<Chapter | null>(null);
   continueReadingTitle = computed(() => {
@@ -326,7 +335,7 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
   unreadCount = signal(0);
   totalCount = signal(0);
   seriesActions = computed(() => {
-    const hasLicense = this.licenseService.hasValidLicense();
+    const hasLicense = this.licenseService.hasActiveLicense();
     let actions = this.actionFactoryService.getSeriesActions()
       .filter(action => action.action !== Action.Edit);
     if (!hasLicense) {
@@ -410,6 +419,21 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
     return webLinks.split(',');
   });
 
+  seriesBasicMetadata = computed<BasicMetadataInfo>(() => {
+    const s = this.series();
+    const meta = this.seriesMetadata();
+    return {
+      readingTime: s,
+      pages: s.pages,
+      words: s.wordCount,
+      addedAt: s.created,
+      updatedAt: s.lastChapterAdded,
+      kavitaId: s.id,
+      language: meta?.language || null,
+      publicationStatus: meta?.publicationStatus ?? null,
+    };
+  });
+
   trackStoryLineIdentity = (index: number, item: StoryLineItem) => item.isChapter ? `${item.chapter!.data.id}_ch_storyline` : `${item.volume!.data.id}_vol_storyline`;
 
   /**
@@ -419,8 +443,17 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
   /**
    * Recommended Series
    */
-  combinedRecs = signal<Array<Series | ExternalSeries>>([]);
+  combinedRecs = signal<Array<RecommendedSeries | ExternalSeries>>([]);
   hasRecommendations = computed(() => this.combinedRecs().length > 0);
+
+  /** Narrows a recommendation item to an owned series (null when it is an external series) */
+  asRecommendedSeries(item: RecommendedSeries | ExternalSeries): RecommendedSeries | null {
+    return 'series' in item ? item : null;
+  }
+
+  asExternalSeries(item: RecommendedSeries | ExternalSeries): ExternalSeries {
+    return item as ExternalSeries;
+  }
 
   showChapterTab = computed(() => this.chapters().length > 0);
   annotations = signal<Annotation[]>([]);
@@ -503,7 +536,7 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
         }
       } else if (event.event === EVENTS.CoverUpdate) {
         const coverUpdateEvent = event.payload as CoverUpdateEvent;
-        if (coverUpdateEvent.id === this.seriesId()) {
+        if (coverUpdateEvent.id === this.seriesId() && coverUpdateEvent.entityType === 'series') {
           this.themeService.refreshColorScape('series', this.seriesId()).subscribe();
         }
       } else if (event.event === EVENTS.ChapterRemoved) {
@@ -514,6 +547,14 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
         const volumeRemoveEvent = event.payload as VolumeRemovedEvent;
         if (volumeRemoveEvent.seriesId === this.seriesId()) {
           this.loadPageSource.next(false);
+        }
+      } else if (event.event === EVENTS.SeriesUpdated) {
+        if ((event.payload as SeriesUpdateEvent).id === this.seriesId()) {
+          this.loadPageSource.next(false);
+        }
+      } else if (event.event === EVENTS.ExternalMetadataUpdate) {
+        if ((event.payload as ExternalMetadataUpdateEvent).seriesId === this.seriesId()) {
+          this.loadPageSource.next(true);
         }
       }
     });
@@ -576,7 +617,7 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
       this.series.set(series);
     });
 
-    this.loadReadingHistory();
+    this.loadReadingHistory(this.readingHistoryCurrentPage(), READING_HISTORY_PAGE_SIZE);
 
     this.seriesService.getMetadata(seriesId).subscribe(metadata => {
       this.seriesMetadata.set({...metadata});
@@ -688,6 +729,7 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
         ...relations.parent.map(item => this.createRelatedSeries(item, RelationKind.Parent)),
         ...relations.editions.map(item => this.createRelatedSeries(item, RelationKind.Edition)),
         ...relations.annuals.map(item => this.createRelatedSeries(item, RelationKind.Annual)),
+        ...relations.cameos.map(item => this.createRelatedSeries(item, RelationKind.Cameo)),
       ]);
     });
   }
@@ -726,10 +768,10 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
     return {series, relation} as RelatedSeriesPair;
   }
 
-  loadReadingHistory(page: number = 1) {
+  loadReadingHistory(page: number, pageSize: number) {
     this.isLoadingReadingHistory.set(true);
 
-    this.statisticsService.getReadingHistoryForSeries(this.seriesId(), page).pipe(
+    this.statisticsService.getReadingHistoryForSeries(this.seriesId(), page, pageSize).pipe(
       tap(result => {
         this.readingHistory.set(result.result);
         this.readingHistoryPagination.set(result.pagination);
@@ -797,29 +839,25 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
   loadPlusMetadata(seriesId: number, libraryType: LibraryType) {
     this.isLoadingExtra.set(true);
 
-    this.metadataService.getSeriesMetadataFromPlus(seriesId, libraryType).subscribe(data => {
-      if (data === null) {
-        this.isLoadingExtra.set(false);
-        return;
-      }
+    this.metadataService.getSeriesMetadataFromPlus(seriesId, libraryType).pipe(
+      tap(data => {
+        if (data === null) {
+          return;
+        }
 
-      // Reviews
-      this.reviews.set(data.reviews.filter(r => !r.isExternal));
-      this.plusReviews.set(data.reviews.filter(r => r.isExternal));
+        this.reviews.set(data.reviews.filter(r => !r.isExternal));
+        this.plusReviews.set(data.reviews.filter(r => r.isExternal));
 
-      if (data.ratings) {
-        this.ratings.set([...data.ratings]);
-      }
+        if (data.ratings) {
+          this.ratings.set([...data.ratings]);
+        }
 
-
-      // Recommendations
-      if (data.recommendations) {
-        this.combinedRecs.set([...data.recommendations.ownedSeries, ...data.recommendations.externalSeries]);
-      }
-
-
-      this.isLoadingExtra.set(false);
-    });
+        if (data.recommendations) {
+          this.combinedRecs.set([...data.recommendations.ownedSeries, ...data.recommendations.externalSeries]);
+        }
+      }),
+      finalize(() => this.isLoadingExtra.set(false)),
+    ).subscribe();
   }
 
   setContinuePoint() {
@@ -880,10 +918,9 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
     this.isWantToRead.update(x => !x);
   }
 
-  openFilter(field: FilterField, value: string | number) {
+  openFilter(field: SeriesFilterField, value: string | number) {
     this.filterUtilityService.applyFilter(['all-series'], field, FilterComparison.Equal, `${value}`).subscribe();
   }
-
 
   toggleScrobbling(evt: any) {
     evt.stopPropagation();
@@ -894,6 +931,11 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
       this.scrobbleService.removeHold(this.seriesId()).subscribe();
     }
     this.isScrobbling.update(x => !x);
+  }
+
+  openKavitaPlusDrawer() {
+    const ref = this.drawerService.open(KavitaplusDrawerComponent, { position: 'end', panelClass: 'kplus-offcanvas' });
+    ref.setInput('seriesId', this.seriesId());
   }
 
   switchTabsToDetail() {
@@ -925,10 +967,12 @@ class SeriesDetailComponent implements OnInit, AfterViewInit {
   protected readonly LooseLeafOrSpecialNumber = LooseLeafOrDefaultNumber;
   protected readonly SpecialVolumeNumber = SpecialVolumeNumber;
   protected readonly SettingsTabId = SettingsTabId;
-  protected readonly FilterField = FilterField;
+  protected readonly FilterField = SeriesFilterField;
   protected readonly AgeRating = AgeRating;
   protected readonly encodeURIComponent = encodeURIComponent;
   protected readonly Breakpoint = Breakpoint;
+  protected readonly READING_HISTORY_PAGE_SIZE = READING_HISTORY_PAGE_SIZE;
+  protected readonly PublicationStatus = PublicationStatus;
 }
 
 export default SeriesDetailComponent

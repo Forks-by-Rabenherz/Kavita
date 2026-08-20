@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using AutoMapper;
+using Hangfire;
 using Kavita.API.Database;
 using Kavita.API.Services;
 using Kavita.Common;
@@ -13,6 +15,7 @@ using Kavita.Models.Constants;
 using Kavita.Models.DTOs;
 using Kavita.Models.DTOs.Email;
 using Kavita.Models.DTOs.KavitaPlus.Metadata;
+using Kavita.Models.DTOs.Metadata;
 using Kavita.Models.DTOs.Settings;
 using Kavita.Models.Entities.Enums;
 using Kavita.Server.Extensions;
@@ -21,6 +24,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using TaskScheduler = Kavita.Services.TaskScheduler;
 
 namespace Kavita.Server.Controllers;
 
@@ -143,12 +147,12 @@ public class SettingsController(
         }
         catch (KavitaException ex)
         {
-            return BadRequest(await localizationService.Translate(UserId, ex.Message));
+            return BadRequest(await localizationService.TranslateAsync(UserId, ex.Message));
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "There was an exception when updating server settings");
-            return BadRequest(await localizationService.Translate(UserId, "generic-error"));
+            return BadRequest(await localizationService.TranslateAsync(UserId, "generic-error"));
         }
     }
 
@@ -241,6 +245,30 @@ public class SettingsController(
         }
     }
 
+    [Authorize(PolicyGroups.AdminPolicy)]
+    [HttpPost("run-metadata-mappings")]
+    public async Task<ActionResult> RunMetadataMappings([FromBody] RunMetadataMappingsRequestDto requestDto)
+    {
+        if (!requestDto.AllLibraries && requestDto.IncludedLibraries.Count == 0)
+        {
+            return BadRequest(await localizationService.TranslateAsync("mappings-re-run-no-libraries-selected"));
+        }
+
+        if (requestDto.ExcludedLibraries.Intersect(requestDto.IncludedLibraries).Any())
+        {
+            return BadRequest(await localizationService.TranslateAsync("mappings-re-run-libraries-overlap"));
+        }
+
+        if (TaskScheduler.IsMethodRunningOrEnqueued(nameof(IMetadataService.RunMetadataMappings), TaskSchedulerConstants.ScanQueue))
+        {
+            return BadRequest(await localizationService.TranslateAsync("mappings-re-run-in-progress"));
+        }
+
+        BackgroundJob.Enqueue<IMetadataService>(s => s.RunMetadataMappings(requestDto, CancellationToken.None));
+
+        return Ok();
+    }
+
     /// <summary>
     /// Import field mappings
     /// </summary>
@@ -297,7 +325,7 @@ public class SettingsController(
     /// <returns></returns>
     [Authorize(PolicyGroups.AdminPolicy)]
     [HttpPost("is-valid-authority")]
-    public async Task<ActionResult<bool>> IsValidAuthority([FromBody] AuthorityValidationDto authority)
+    public async Task<ActionResult<AuthorityValidationResult>> IsValidAuthority([FromBody] AuthorityValidationDto authority)
     {
         return Ok(await settingsService.IsValidAuthority(authority.Authority));
     }

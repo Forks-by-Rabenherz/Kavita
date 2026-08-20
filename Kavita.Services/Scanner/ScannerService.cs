@@ -59,7 +59,8 @@ public class ScannerService(
     IDirectoryService directoryService,
     IReadingItemService readingItemService,
     IServiceScopeFactory scopeFactory,
-    IWordCountAnalyzerService wordCountAnalyzerService)
+    IWordCountAnalyzerService wordCountAnalyzerService,
+    IMediaErrorService mediaErrorService)
     : IScannerService
 {
     public const string Name = "ScannerService";
@@ -106,16 +107,19 @@ public class ScannerService(
         Series? series = null;
         try
         {
-            series = await unitOfWork.SeriesRepository.GetSeriesThatContainsLowestFolderPath(originalPath,
+            series = await unitOfWork.SeriesRepository.GetSeriesThatContainsLowestFolderPathAsync(originalPath,
                          SeriesIncludes.Library) ??
-                     await unitOfWork.SeriesRepository.GetSeriesByFolderPath(originalPath, SeriesIncludes.Library) ??
-                     await unitOfWork.SeriesRepository.GetSeriesByFolderPath(folder, SeriesIncludes.Library);
+                     await unitOfWork.SeriesRepository.GetSeriesByFolderPathAsync(originalPath, SeriesIncludes.Library) ??
+                     await unitOfWork.SeriesRepository.GetSeriesByFolderPathAsync(folder, SeriesIncludes.Library);
         }
         catch (InvalidOperationException ex)
         {
             if (ex.Message.Equals("Sequence contains more than one element."))
             {
-                logger.LogCritical(ex, "[ScannerService] Multiple series map to this folder or folder is at library root. Library scan will be used for ScanFolder");
+                // Removing stack trace from logs as it freaks users out, and it does not contain useful information
+                #pragma warning disable S6667
+                logger.LogCritical("[ScannerService] Multiple series map to this folder or folder is at library root. Library scan will be used for ScanFolder");
+                #pragma warning restore S6667
             }
         }
 
@@ -145,7 +149,7 @@ public class ScannerService(
 
         var libraries = (await unitOfWork.LibraryRepository.GetLibraryDtosAsync()).ToList();
         var libraryFolders = libraries.SelectMany(l => l.Folders);
-        var libraryFolder = libraryFolders.Select(Parser.Normalize).FirstOrDefault(f => f.Contains(parentDirectory));
+        var libraryFolder = libraryFolders.Select(Parser.NormalizePath).FirstOrDefault(f => f.Contains(parentDirectory));
 
         if (string.IsNullOrEmpty(libraryFolder))
         {
@@ -208,7 +212,7 @@ public class ScannerService(
         if (string.IsNullOrEmpty(folderPath) || !directoryService.Exists(folderPath))
         {
             // We don't care if it's multiple due to new scan loop enforcing all in one root directory
-            var files = await unitOfWork.SeriesRepository.GetFilesForSeries(seriesId);
+            var files = await unitOfWork.SeriesRepository.GetFilesForSeriesAsync(seriesId);
             var seriesDirs = directoryService.FindHighestDirectoriesFromFiles(libraryPaths,
                 files.Select(f => f.FilePath).ToList());
             if (seriesDirs.Keys.Count == 0)
@@ -251,7 +255,7 @@ public class ScannerService(
         // If nothing was found, first validate any of the files still exist. If they don't then we have a deletion and can skip the rest of the logic flow
         if (parsedSeries.Count == 0)
         {
-             var seriesFiles = (await unitOfWork.SeriesRepository.GetFilesForSeries(series.Id));
+             var seriesFiles = (await unitOfWork.SeriesRepository.GetFilesForSeriesAsync(series.Id));
              if (!string.IsNullOrEmpty(series.FolderPath) &&
                  !seriesFiles.Where(f => f.FilePath.Contains(series.FolderPath)).Any(m => File.Exists(m.FilePath)))
              {
@@ -284,7 +288,7 @@ public class ScannerService(
         // Don't allow any processing on files that aren't part of this series
         var toProcess = parsedSeries.Keys.Where(key =>
             key.NormalizedName.Equals(series.NormalizedName) ||
-            key.NormalizedName.Equals(series.OriginalName?.ToNormalized()))
+            key.NormalizedName.Equals(series.NormalizedOriginalName))
             .ToList();
 
         var toProcessList = toProcess.Select(k => parsedSeries[k]).ToList();
@@ -353,7 +357,7 @@ public class ScannerService(
 
     private async Task<ScanCancelReason> ShouldScanSeries(int seriesId, Library library, IList<string> libraryPaths, Series series, bool bypassFolderChecks = false)
     {
-        var seriesFolderPaths = (await unitOfWork.SeriesRepository.GetFilesForSeries(seriesId))
+        var seriesFolderPaths = (await unitOfWork.SeriesRepository.GetFilesForSeriesAsync(seriesId))
             .Select(f => directoryService.FileSystem.FileInfo.New(f.FilePath).Directory?.FullName ?? string.Empty)
             .Where(f => !string.IsNullOrEmpty(f))
             .Distinct()
@@ -579,7 +583,7 @@ public class ScannerService(
         {
             logger.LogDebug("[ScannerService] Removing series that were not found during the scan");
 
-            var removedSeries = await unitOfWork.SeriesRepository.RemoveSeriesNotInList(parsedSeries.Keys.ToList(), library.Id);
+            var removedSeries = await unitOfWork.SeriesRepository.RemoveSeriesNotInListAsync(parsedSeries.Keys.ToList(), library.Id);
             logger.LogDebug("[ScannerService] Found {Count} series to remove: {SeriesList}",
                 removedSeries.Count, string.Join(", ", removedSeries.Select(s => s.Name)));
 
@@ -804,11 +808,11 @@ public class ScannerService(
     private async Task<Tuple<long, Dictionary<ParsedSeries, IList<ParserInfo>>>> ScanFiles(Library library, IList<string> dirs,
         bool isLibraryScan, bool forceChecks = false)
     {
-        var scanner = new ParseScannedFiles(logger, directoryService, readingItemService, eventHub);
+        var scanner = new ParseScannedFiles(logger, directoryService, readingItemService, eventHub, mediaErrorService);
         var scanWatch = Stopwatch.StartNew();
 
         var processedSeries = await scanner.ScanLibrariesForSeries(library, dirs,
-            isLibraryScan, await unitOfWork.SeriesRepository.GetFolderPathMap(library.Id), forceChecks);
+            isLibraryScan, await unitOfWork.SeriesRepository.GetFolderPathMapAsync(library.Id), forceChecks);
 
         var scanElapsedTime = scanWatch.ElapsedMilliseconds;
 

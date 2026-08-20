@@ -20,6 +20,8 @@ using Kavita.Models.DTOs.KavitaPlus.Metadata;
 using Kavita.Models.DTOs.Settings;
 using Kavita.Models.Entities;
 using Kavita.Models.Entities.Enums;
+using Kavita.Services.Helpers;
+using Kavita.Models.Entities.MetadataMatching;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
@@ -52,7 +54,9 @@ public class SettingsService(
         existingMetadataSetting.EnableExtendedMetadataProcessing = dto.EnableExtendedMetadataProcessing;
         existingMetadataSetting.EnableSummary = dto.EnableSummary;
         existingMetadataSetting.EnableLocalizedName = dto.EnableLocalizedName;
+        existingMetadataSetting.EnableName = dto.EnableName;
         existingMetadataSetting.EnablePublicationStatus = dto.EnablePublicationStatus;
+        existingMetadataSetting.EnableAgeRating = dto.EnableAgeRating;
         existingMetadataSetting.EnableRelationships = dto.EnableRelationships;
         existingMetadataSetting.EnablePeople = dto.EnablePeople;
         existingMetadataSetting.EnableStartDate = dto.EnableStartDate;
@@ -67,12 +71,27 @@ public class SettingsService(
         existingMetadataSetting.EnableChapterReleaseDate = dto.EnableChapterReleaseDate;
         existingMetadataSetting.EnableChapterCoverImage = dto.EnableChapterCoverImage;
 
-        existingMetadataSetting.AgeRatingMappings = dto.AgeRatingMappings ?? [];
+        existingMetadataSetting.EnableVolumeCoverImage = dto.EnableVolumeCoverImage;
 
-        existingMetadataSetting.Blacklist = (dto.Blacklist ?? []).Where(s => !string.IsNullOrWhiteSpace(s)).DistinctBy(d => d.ToNormalized()).ToList() ?? [];
-        existingMetadataSetting.Whitelist = (dto.Whitelist ?? []).Where(s => !string.IsNullOrWhiteSpace(s)).DistinctBy(d => d.ToNormalized()).ToList() ?? [];
+        existingMetadataSetting.AgeRatingMappings = dto.AgeRatingMappings ?? [];
+        existingMetadataSetting.ExternalAgeRatingMappings = dto.ExternalAgeRatingMappings ?? [];
+
+        existingMetadataSetting.Blacklist = TagHelper.SortAndCleanTagList(dto.Blacklist);
+        existingMetadataSetting.Whitelist = TagHelper.SortAndCleanTagList(dto.Whitelist);
         existingMetadataSetting.Overrides = [.. dto.Overrides ?? []];
         existingMetadataSetting.PersonRoles = dto.PersonRoles ?? [];
+        existingMetadataSetting.FilterAboveWeight = dto.FilterAboveWeight;
+
+        // Sanitize the tags by shape only as Windows/Linux will differ on supported codes from CultureInfo.GetCultures, like ja-Latn
+        existingMetadataSetting.GlobalNameLanguages = LanguageCodeHelper.Sanitize(dto.GlobalLanguageTitleSettings.Name);
+        existingMetadataSetting.GlobalLocalizedNameLanguages = LanguageCodeHelper.Sanitize(dto.GlobalLanguageTitleSettings?.LocalizedName);
+        existingMetadataSetting.LibraryLanguageTitleOverrides = (dto.LibraryLanguageTitleOverrides ?? [])
+            .Where(kvp => kvp is { Key: > 0, Value: not null })
+            .ToDictionary(kvp => kvp.Key, kvp => new SeriesNameLanguage
+            {
+                Name = LanguageCodeHelper.Sanitize(kvp.Value.Name),
+                LocalizedName = LanguageCodeHelper.Sanitize(kvp.Value.LocalizedName),
+            });
 
         // Handle Field Mappings
 
@@ -149,6 +168,7 @@ public class SettingsService(
         {
             existingMetadataSetting.AgeRatingMappings = dto.AgeRatingMappings;
         }
+
 
         if (settings.FieldMappings)
         {
@@ -507,16 +527,16 @@ public class SettingsService(
         return updateSettingsDto;
     }
 
-    public async Task<bool> IsValidAuthority(string authority, CancellationToken ct = default)
+    public async Task<AuthorityValidationResult> IsValidAuthority(string authority, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(authority))
         {
-            return false;
+            return AuthorityValidationResult.NotApplicable;
         }
 
         if (!_isDevelopment && !authority.StartsWith("https"))
         {
-            return false;
+            return AuthorityValidationResult.MissingHttps;
         }
 
         try
@@ -524,14 +544,16 @@ public class SettingsService(
             var hasTrailingSlash = authority.EndsWith('/');
             var url = authority + (hasTrailingSlash ? string.Empty : "/") + ".well-known/openid-configuration";
 
-            var json = await url.GetStringAsync(cancellationToken: ct);
+            // We allow non-SSRF protected urls for OIDC Validity (#4663)
+            var json = await url
+                .GetStringAsync(cancellationToken: ct);
             var config = OpenIdConnectConfiguration.Create(json);
-            return config.Issuer == authority;
+            return config.Issuer == authority ? AuthorityValidationResult.Success : AuthorityValidationResult.InvalidAuthority;
         }
         catch (Exception e)
         {
             logger.LogDebug(e, "OpenIdConfiguration failed: {Reason}", e.Message);
-            return false;
+            return AuthorityValidationResult.Failure;
         }
     }
 
@@ -562,6 +584,13 @@ public class SettingsService(
         if (setting.Key == ServerSettingKey.TaskCleanup && updateSettingsDto.TaskCleanup != setting.Value)
         {
             setting.Value = updateSettingsDto.TaskCleanup;
+            unitOfWork.SettingsRepository.Update(setting);
+            return true;
+        }
+
+        if (setting.Key == ServerSettingKey.TaskCblSync && updateSettingsDto.TaskCblSync != setting.Value)
+        {
+            setting.Value = updateSettingsDto.TaskCblSync;
             unitOfWork.SettingsRepository.Update(setting);
             return true;
         }
@@ -599,7 +628,8 @@ public class SettingsService(
         if (currentConfig.Authority != updateSettingsDto.OidcConfig.Authority)
         {
             // Only check validity if we're changing into a value that would be used
-            if (!string.IsNullOrEmpty(updateSettingsDto.OidcConfig.Authority) && !await IsValidAuthority(updateSettingsDto.OidcConfig.Authority + string.Empty))
+            if (!string.IsNullOrEmpty(updateSettingsDto.OidcConfig.Authority)
+                && await IsValidAuthority(updateSettingsDto.OidcConfig.Authority + string.Empty) != AuthorityValidationResult.Success)
             {
                 throw new KavitaException("oidc-invalid-authority");
             }

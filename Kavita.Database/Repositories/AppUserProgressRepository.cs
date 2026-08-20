@@ -187,7 +187,7 @@ public class AppUserProgressRepository(DataContext context, IMapper mapper) : IA
     public async Task<DateTime?> GetFirstProgressForSeries(int seriesId, int userId, CancellationToken ct = default)
     {
         var list = await context.AppUserProgresses.Where(p => p.AppUserId == userId && p.SeriesId == seriesId)
-            .Select(p => p.LastModifiedUtc)
+            .Select(p => p.CreatedUtc)
             .ToListAsync(ct);
         return list.Count == 0 ? null : list.DefaultIfEmpty().Min();
     }
@@ -232,34 +232,6 @@ public class AppUserProgressRepository(DataContext context, IMapper mapper) : IA
         await context.Database.ExecuteSqlRawAsync(batchSql, ct);
     }
 
-    /// <summary>
-    ///
-    /// </summary>
-    /// <param name="chapterId"></param>
-    /// <param name="userId">If 0, will pull all records</param>
-    /// <param name="ct"></param>
-    /// <returns></returns>
-    public async Task<IList<FullProgressDto>> GetUserProgressForChapter(int chapterId, int userId = 0,
-        CancellationToken ct = default)
-    {
-        return await context.AppUserProgresses
-            .WhereIf(userId > 0, p => p.AppUserId == userId)
-            .Where(p => p.ChapterId == chapterId)
-            .Include(p => p.AppUser)
-            .Select(p => new FullProgressDto()
-            {
-                AppUserId = p.AppUserId,
-                ChapterId = p.ChapterId,
-                PagesRead = p.PagesRead,
-                Id = p.Id,
-                Created = p.Created,
-                CreatedUtc = p.CreatedUtc,
-                LastModified = p.LastModified,
-                LastModifiedUtc = p.LastModifiedUtc,
-                UserName = p.AppUser.UserName
-            })
-            .ToListAsync(ct);
-    }
 
     public Task<Dictionary<int, int>> GetUserProgressForChaptersBySeries(int userId, int seriesId, CancellationToken ct = default)
     {

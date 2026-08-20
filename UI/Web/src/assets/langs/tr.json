@@ -57,7 +57,6 @@
         "description": "Burada, hesabınızla bağlantılı tüm scrobble etkinliklerini bulabilirsiniz. Etkinliklerin görünmesi için, aktif bir scrobble sağlayıcısı yapılandırmış olmanız gerekir. İşlenen tüm etkinlikler bir ay sonra silinir. İşlenmemiş etkinlikler varsa, bunlar muhtemelen yukarı akışta eşleşmeler oluşturamaz. Bunların düzeltilmesi için lütfen yöneticinize başvurun.",
         "not-read-warning": "Yukarı akış sağlayıcılar her zaman en yüksek sayıyı koruyacaktır",
         "is-processed-header": "İşlenmiştir",
-        "generate-scrobble-events": "Geri Doldurma Etkinlikleri",
         "token-expired": "AniList jetonunuzun süresi doldu! Hesaplar sayfasında yenileme yapana kadar scrobbling etkinlikleri işlenmeyecektir.",
         "rating": "Derecelendirme {{r}}",
         "scrobbling-disabled": "Scrobbling, Hesap Ayarlarınızda devre dışı bırakılmıştır."
@@ -141,8 +140,6 @@
         "applied": "Uygulanmış",
         "updated-toastr": "Site varsayılanı {{name}} olarak güncellendi",
         "delete": "{{common.delete}}",
-        "drag-n-drop": "{{cover-image-chooser.drag-n-drop}}",
-        "upload": "{{cover-image-chooser.upload}}",
         "add": "{{common.add}}",
         "downloadable": "İndirilebilir",
         "downloaded": "İndirildi",
@@ -289,7 +286,6 @@
         "editor": "Editör",
         "translator": "Çevirmen",
         "publisher": "Yayıncı",
-        "other": "Diğer",
         "imprint": "Künye",
         "penciller": "Çizer",
         "artist": "Sanatçı",
@@ -316,7 +312,6 @@
     },
     "all-filters": {
         "count": "{{count}} {{customize-dashboard-modal.title-smart-filters}}",
-        "create": "{{common.create}}",
         "title": "Tüm Akıllı Filtreler"
     },
     "invite-user": {
@@ -341,40 +336,6 @@
         "deselect-all": "{{common.deselect-all}}",
         "title": "{{common.libraries}}",
         "no-data": "Henüz hiçbir kütüphane kurulmadı."
-    },
-    "license": {
-        "cancel": "{{common.cancel}}",
-        "edit": "{{common.edit}}",
-        "loading": "{{common.loading}}",
-        "activate-email-label": "{{common.email}}",
-        "activate-delete": "{{common.delete}}",
-        "activate-reset": "Lisansı Sıfırla",
-        "activate-save": "{{common.save}}",
-        "reset-label": "Sıfırla",
-        "manage": "Yönet",
-        "buy": "Satın Al",
-        "valid-tooltip": "Geçerli",
-        "invalid-tooltip": "Geçersiz",
-        "activate-license-label": "Lisans Anahtarı",
-        "overwrite": "Üzerine Yaz",
-        "k+-unlocked": "Kavita+ kilidi açıldı!",
-        "delete-label": "Lisansı Kaldır",
-        "renew": "Yenile",
-        "activate": "Etkinleştir",
-        "license-active-label": "Lisans Etkin",
-        "info-title": "Lisans Bilgisi",
-        "license-valid": "Lisans Geçerlidir",
-        "license-not-valid": "Lisans Geçersiz",
-        "email-label": "Kayıtlı E-posta",
-        "k+-already-registered-header": "Lisans zaten kayıtlı",
-        "check": "Kontrol et",
-        "no-license-key": "Lisans anahtarı yok",
-        "actions-title": "Eylemler",
-        "expiration-label": "Sona erme",
-        "title": "Kavita+ Lisansı",
-        "help-label": "{{common.help}}",
-        "faq-title": "SSS",
-        "kavita+-desc-part-3": "bugün!"
     },
     "book-line-overlay": {
         "close": "{{common.close}}",
@@ -692,13 +653,10 @@
         "reset-to-default": "{{common.reset-to-default}}",
         "reset": "{{common.reset}}",
         "save": "{{common.save}}",
-        "required": "{{validation.required-field}}",
         "backup-database-task": "Veritabanını Yedekle",
         "check-for-updates-task": "Güncellemeleri Kontrol Et",
-        "custom": "Kişiselleştir",
         "description-header": "Açıklama",
-        "recurring-tasks-title": "{{title}}",
-        "daily": "Günlük"
+        "recurring-tasks-title": "{{title}}"
     },
     "manage-users": {
         "edit-user-tooltip": "Düzenle",
@@ -767,7 +725,6 @@
     "collection-detail": {
         "item-count": "{{common.item-count}}",
         "last-sync": "Son Senkron: {{date}}",
-        "title-alt": "Kavita - {{collectionName}} Koleksiyonu",
         "sync-progress": "Derlenen Seriler: {{title}}"
     },
     "all-collections": {
@@ -881,13 +838,7 @@
         "series-count": "{{common.series-count}}"
     },
     "import-cbl-modal": {
-        "close": "{{common.close}}",
-        "import": "İçe Aktar",
-        "final-import-step": "Son Adım",
-        "help-label": "{{common.help}}",
-        "next": "Sonraki",
-        "prev": "Önce",
-        "restart": "Yeniden başlat"
+        "close": "{{common.close}}"
     },
     "manga-reader": {
         "auto-close-menu-label": "{{manage-reading-profiles.auto-close-menu-label}}",
@@ -1418,11 +1369,6 @@
         "multiple": "Varsayılan"
     },
     "font-manager": {
-        "back": "Geri",
-        "load": "Yükle",
-        "enter-an-url-pre-title": "Bir {{url}} girin",
-        "url": "url",
-        "url-label": "Url",
         "add": "{{common.add}}",
         "delete": "{{common.delete}}",
         "upload": "{{cover-image-chooser.upload}}",
@@ -1461,7 +1407,6 @@
         "require-verified-email-label": "Doğrulanmış e-postalar gerektirir",
         "auto-login-label": "Otomatik giriş",
         "disable-password-authentication-label": "Parola doğrulamasını devre dışı bırak",
-        "disable-password-authentication-tooltip": "Yönetici rolüne sahip kullanıcılar bu kısıtlamayı aşabilir",
         "advanced-title": "Gelişmiş ayarlar",
         "provider-title": "Sağlayıcı",
         "default-libraries-label": "{{common.libraries}}",

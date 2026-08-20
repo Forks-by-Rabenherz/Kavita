@@ -6,18 +6,11 @@ import {
   EventEmitter,
   inject,
   Input,
-  OnInit
+  OnInit,
+  signal
 } from '@angular/core';
 import {FormBuilder, FormControl, FormGroup, ReactiveFormsModule, Validators} from '@angular/forms';
-import {
-  NgbActiveModal,
-  NgbCollapse,
-  NgbNav,
-  NgbNavContent,
-  NgbNavItem,
-  NgbNavLink,
-  NgbNavOutlet
-} from '@ng-bootstrap/ng-bootstrap';
+import {NgbActiveModal, NgbCollapse} from '@ng-bootstrap/ng-bootstrap';
 import {concat, delay, forkJoin, last, Observable, of, tap} from 'rxjs';
 import {map, switchMap} from 'rxjs/operators';
 import {UtilityService} from 'src/app/shared/_services/utility.service';
@@ -52,31 +45,38 @@ import {translate, TranslocoModule} from "@jsverse/transloco";
 import {UtcToLocalTimePipe} from "../../../_pipes/utc-to-local-time.pipe";
 import {EditListComponent} from "../../../shared/edit-list/edit-list.component";
 import {AccountService} from "../../../_services/account.service";
-import {Volume} from "../../../_models/volume";
 import {SettingButtonComponent} from "../../../settings/_components/setting-button/setting-button.component";
 import {SettingItemComponent} from "../../../settings/_components/setting-item/setting-item.component";
 import {LicenseService} from "../../../_services/license.service";
-import {DecimalPipe, NgTemplateOutlet, TitleCasePipe} from "@angular/common";
+import {DecimalPipe, NgTemplateOutlet} from "@angular/common";
 import {BreakpointService} from "../../../_services/breakpoint.service";
 import {ActionFactoryService} from "../../../_services/action-factory.service";
 import {ActionItem} from "../../../_models/actionables/action-item";
 import {Action} from "../../../_models/actionables/action";
 import {modalSaved} from "../../../_models/modal/modal-result";
 import {Tabs} from "../../../_models/tabs";
-import {TabTitlePipe} from "../../../_pipes/tab-title.pipe";
 import {
+  addMetadataIdControls,
   EditExternalMetadataFormComponent
 } from "../../../shared/_components/edit-external-metadata-form/edit-external-metadata-form.component";
+import {MangaFormat} from "../../../_models/manga-format";
+import {LibraryType} from "../../../_models/library/library";
+import {
+  CoverChooserConfigFactoryService,
+  CoverImageChooserConfig
+} from "../../../_services/cover-chooser-config-factory.service";
+import {Volume} from "../../../_models/volume";
+import {ConfirmService} from "../../../shared/confirm.service";
+import {EditModalShellComponent} from "../../../shared/edit-modal-shell/edit-modal-shell.component";
+import {EditTabDirective} from "../../../shared/_directive/edit-tab.directive";
+import {AllMetadataProviders, MetadataProvider} from "src/app/_models/kavitaplus/metadata-provider.enum";
+import {MetadataProviderTitlePipe} from "../../../_pipes/metadata-provider-title.pipe";
 
 
 @Component({
   selector: 'app-edit-series-modal',
   imports: [
     ReactiveFormsModule,
-    NgbNav,
-    NgbNavContent,
-    NgbNavItem,
-    NgbNavLink,
     TypeaheadComponent,
     CoverImageChooserComponent,
     EditSeriesRelationComponent,
@@ -88,7 +88,6 @@ import {
     BytesPipe,
     ImageComponent,
     NgbCollapse,
-    NgbNavOutlet,
     DefaultValuePipe,
     TranslocoModule,
     UtcToLocalTimePipe,
@@ -97,9 +96,10 @@ import {
     SettingItemComponent,
     NgTemplateOutlet,
     DecimalPipe,
-    TitleCasePipe,
-    TabTitlePipe,
     EditExternalMetadataFormComponent,
+    EditModalShellComponent,
+    EditTabDirective,
+    MetadataProviderTitlePipe
   ],
   templateUrl: './edit-series-modal.component.html',
   styleUrls: ['./edit-series-modal.component.scss'],
@@ -121,6 +121,8 @@ export class EditSeriesModalComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
   private readonly actionFactoryService = inject(ActionFactoryService);
   protected readonly breakpointService = inject(BreakpointService);
+  private readonly coverChooserConfigFactory = inject(CoverChooserConfigFactoryService);
+  private readonly confirmService = inject(ConfirmService);
 
   protected readonly Tabs = Tabs;
   protected readonly PersonRole = PersonRole;
@@ -130,7 +132,7 @@ export class EditSeriesModalComponent implements OnInit {
 
 
   seriesVolumes: any[] = [];
-  isLoadingVolumes = false;
+  isLoadingVolumes = signal<boolean>(false);
   /**
    * A copy of the series from init. This is used to compare values for name fields to see if lock was modified
    */
@@ -142,6 +144,8 @@ export class EditSeriesModalComponent implements OnInit {
   editSeriesForm!: FormGroup;
   libraryName: string | undefined = undefined;
   size: number = 0;
+  libraryType = signal<LibraryType>(LibraryType.Manga);
+  protected readonly allMetadataProviders = AllMetadataProviders;
 
 
   // Typeaheads
@@ -156,12 +160,10 @@ export class EditSeriesModalComponent implements OnInit {
   publicationStatuses: Array<PublicationStatusDto> = [];
 
   metadata!: SeriesMetadata;
-  imageUrls: Array<string> = [];
-  /**
-   * Selected Cover for uploading
-   */
   selectedCover: string = '';
   coverImageReset = false;
+  coverImageDirty = false;
+  chooserConfig = signal<CoverImageChooserConfig>({});
 
   saveNestedComponents: EventEmitter<void> = new EventEmitter();
 
@@ -180,8 +182,6 @@ export class EditSeriesModalComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.imageUrls.push(this.imageService.getSeriesCoverImage(this.series.id));
-
     this.libraryService.getLibraryNames().pipe(takeUntilDestroyed(this.destroyRef)).subscribe(names => {
       this.libraryName = names[this.series.libraryId];
     });
@@ -196,14 +196,17 @@ export class EditSeriesModalComponent implements OnInit {
       sortName: new FormControl(this.series.sortName, [Validators.required]),
       rating: new FormControl(this.series.userRating, []),
 
-      coverImageIndex: new FormControl(0, []),
       coverImageLocked: new FormControl(this.series.coverImageLocked, []),
 
       ageRating: new FormControl('', []),
       publicationStatus: new FormControl('', []),
       language: new FormControl('', []),
       releaseYear: new FormControl('', [Validators.minLength(4), Validators.maxLength(4), Validators.pattern(/([1-9]\d{3})|[0]{1}/)]),
+      metadataProviderOverride: new FormControl<MetadataProvider | null>(this.series.metadataProviderOverride ?? null, []),
     });
+
+    addMetadataIdControls(this.editSeriesForm, this.series);
+
     this.cdRef.markForCheck();
 
 
@@ -274,21 +277,21 @@ export class EditSeriesModalComponent implements OnInit {
       }
     });
 
-    this.isLoadingVolumes = true;
-    this.cdRef.markForCheck();
-    this.seriesService.getVolumes(this.series.id).subscribe(volumes => {
-      this.seriesVolumes = volumes;
-      this.isLoadingVolumes = false;
+    this.isLoadingVolumes.set(true);
 
-      if (this.seriesVolumes.length === 1) {
-        this.imageUrls.push(...this.seriesVolumes[0].chapters.map((c: Chapter) => this.imageService.getChapterCoverImage(c.id)));
-      } else {
-        this.imageUrls.push(...this.seriesVolumes.map(v => this.imageService.getVolumeCoverImage(v.id)));
-      }
+    forkJoin({volumes: this.seriesService.getVolumes(this.series.id), libraryType: this.libraryService.getLibraryType(this.series.libraryId)}).subscribe(res => {
+      const volumes = res.volumes;
+      const libraryType = res.libraryType;
+
+      this.seriesVolumes = volumes;
+      this.libraryType.set(libraryType);
+      this.isLoadingVolumes.set(false);
+      this.chooserConfig.set(this.coverChooserConfigFactory.forSeries(this.series, this.seriesVolumes, this.libraryType()));
 
       volumes.forEach(v => {
         this.volumeCollapsed[v.name] = true;
       });
+
       this.seriesVolumes.forEach(vol => {
         vol.volumeFiles = vol.chapters?.map((c: Chapter) => c.files.map((f: any) => {
           // TODO: Identify how to fix this hack
@@ -308,16 +311,10 @@ export class EditSeriesModalComponent implements OnInit {
       }
       this.cdRef.markForCheck();
     });
+
   }
 
-  formatVolumeName(volume: Volume) {
-    if (volume.minNumber === LooseLeafOrDefaultNumber) {
-      return translate('edit-series-modal.loose-leaf-volume');
-    } else if (volume.minNumber === SpecialVolumeNumber) {
-      return translate('edit-series-modal.specials-volume');
-    }
-    return translate('edit-series-modal.volume-num') + ' ' + volume.name;
-  }
+
 
 
   setupTypeaheads() {
@@ -485,7 +482,11 @@ export class EditSeriesModalComponent implements OnInit {
   }
 
   close() {
-    this.modal.dismiss();
+    if (this.coverImageReset) {
+      this.modal.close(modalSaved(this.series, true));
+    } else {
+      this.modal.dismiss();
+    }
   }
 
   updateWeblinks(items: Array<string>) {
@@ -493,33 +494,35 @@ export class EditSeriesModalComponent implements OnInit {
   }
 
 
-  save() {
+  async save() {
     const model = this.editSeriesForm.getRawValue();
-    const selectedIndex = this.editSeriesForm.get('coverImageIndex')?.value || 0;
 
-    const apis = [
-      this.seriesService.updateMetadata(this.metadata)
-    ];
+    const nameChanged = this.editSeriesForm.get('name')?.dirty ?? false;
 
-    // We only need to call updateSeries if we changed name, sort name, or localized name or reset a cover image
-    const nameFieldsDirty = this.editSeriesForm.get('name')?.dirty || this.editSeriesForm.get('sortName')?.dirty || this.editSeriesForm.get('localizedName')?.dirty;
-    const nameFieldLockChanged = this.series.nameLocked !== this.initSeries.nameLocked || this.series.sortNameLocked !== this.initSeries.sortNameLocked || this.series.localizedNameLocked !== this.initSeries.localizedNameLocked;
+    // If the user renamed the series but has a locked (custom) sort name, offer to align it.
+    // When the sort name is unlocked the backend reseeds it from the new name automatically.
+    if (nameChanged && this.series.sortNameLocked && model.sortName !== model.name) {
+      if (await this.confirmService.confirm(translate('edit-series-modal.align-sort-name'))) {
+        model.sortName = model.name;
+        this.editSeriesForm.get('sortName')?.patchValue(model.name);
+      }
+    }
 
     let updatedSeries: Series | null = null;
 
-    if (nameFieldsDirty || nameFieldLockChanged || this.coverImageReset) {
-      model.nameLocked = this.series.nameLocked;
-      model.sortNameLocked = this.series.sortNameLocked;
-      model.localizedNameLocked = this.series.localizedNameLocked;
-      model.language = this.metadata.language;
-    }
+    model.nameLocked = this.series.nameLocked;
+    model.sortNameLocked = this.series.sortNameLocked;
+    model.localizedNameLocked = this.series.localizedNameLocked;
+    model.language = this.metadata.language;
 
-    apis.push(this.seriesService.updateSeries(model).pipe(
-      tap(result => updatedSeries = result)
-    ));
+    // updateSeries runs first so a name collision (400) short-circuits the chain before metadata is written
+    const apis = [
+      this.seriesService.updateSeries(model).pipe(tap(result => updatedSeries = result)),
+      this.seriesService.updateMetadata(this.metadata)
+    ];
 
-    if (selectedIndex > 0 || this.coverImageReset) {
-      apis.push(this.uploadService.updateSeriesCoverImage(model.id, this.selectedCover, !this.coverImageReset));
+    if (this.coverImageDirty) {
+      apis.push(this.uploadService.updateSeriesCoverImage(model.id, this.selectedCover, true));
     }
 
     this.saveNestedComponents.emit();
@@ -528,8 +531,14 @@ export class EditSeriesModalComponent implements OnInit {
     concat(...apis).pipe(
       delay(10),
       last()
-    ).subscribe(() => {
-      this.modal.close(modalSaved(updatedSeries ?? model, selectedIndex > 0 || this.coverImageReset));
+    ).subscribe({
+      next: () => {
+        this.modal.close(modalSaved(updatedSeries ?? model, this.coverImageDirty || this.coverImageReset));
+      },
+      error: () => {
+        // A duplicate name (400) is surfaced by the global error interceptor; keep the modal open
+        this.cdRef.markForCheck();
+      }
     });
   }
 
@@ -560,24 +569,15 @@ export class EditSeriesModalComponent implements OnInit {
     this.cdRef.markForCheck();
   }
 
-  updateSelectedIndex(index: number) {
-    this.editSeriesForm.patchValue({
-      coverImageIndex: index
-    });
-    this.cdRef.markForCheck();
-  }
-
-  updateSelectedImage(url: string) {
-    this.selectedCover = url;
-    this.cdRef.markForCheck();
+  handleCoverChanged(event: { isDirty: boolean; fileName: string }) {
+    this.coverImageDirty = event.isDirty;
+    this.selectedCover = event.fileName;
   }
 
   handleReset() {
     this.coverImageReset = true;
-    this.editSeriesForm.patchValue({
-      coverImageLocked: false
-    });
-    this.cdRef.markForCheck();
+    this.editSeriesForm.patchValue({ coverImageLocked: false });
+    this.chooserConfig.set({ ...this.chooserConfig(), isLocked: false });
   }
 
   unlock(b: any, field: string) {
@@ -588,8 +588,24 @@ export class EditSeriesModalComponent implements OnInit {
   }
 
   async runTask(action: ActionItem<Series>) {
+    action.callback(action,  this.series);
+  }
 
+  formatVolumeName(volume: Volume) {
+    if (volume.minNumber === LooseLeafOrDefaultNumber) {
+      return translate('edit-series-modal.loose-leaf-volume');
+    } else if (volume.minNumber === SpecialVolumeNumber) {
+      return translate('edit-series-modal.specials-volume');
+    }
+    return translate('edit-series-modal.volume-num', {num: volume.name});
+  }
+
+  changeTab(tab?: Tabs) {
+    if (!tab) return;
+    this.active = tab;
+    this.cdRef.markForCheck();
   }
 
   protected readonly LooseLeafOrDefaultNumber = LooseLeafOrDefaultNumber;
+  protected readonly MangaFormat = MangaFormat;
 }

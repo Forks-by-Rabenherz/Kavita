@@ -1,10 +1,10 @@
 import {effect, inject, Injectable} from '@angular/core';
-import {EMPTY, map, shareReplay} from 'rxjs';
+import {EMPTY, map, of, shareReplay, switchMap} from 'rxjs';
 import {Chapter} from '../_models/chapter';
 import {UserCollection} from '../_models/collection-tag';
 import {Device} from '../_models/device/device';
 import {Library, LibraryType} from '../_models/library/library';
-import {ReadingList} from '../_models/reading-list';
+import {ReadingList} from '../_models/reading-list/reading-list';
 import {Series} from '../_models/series';
 import {Volume} from '../_models/volume';
 import {AccountService, Role} from './account.service';
@@ -21,6 +21,7 @@ import {ActionService} from "./action.service";
 import {ActionItem, ActionShouldRenderFunc} from "../_models/actionables/action-item";
 import {Action} from "../_models/actionables/action";
 import {ActionResultCallback} from "../_models/actionables/action-result";
+import {SettingsService} from "../admin/settings.service";
 
 
 /**
@@ -35,6 +36,7 @@ export class ActionFactoryService {
   private accountService = inject(AccountService);
   private deviceService = inject(DeviceService);
   private actionService = inject(ActionService);
+  private settingsService = inject(SettingsService);
 
   private libraryActions: Array<ActionItem<Library>> = [];
   private seriesActions: Array<ActionItem<Series>> = [];
@@ -47,6 +49,7 @@ export class ActionFactoryService {
   private sideNavStreamActions: Array<ActionItem<SideNavStream>> = [];
   private smartFilterActions: Array<ActionItem<SmartFilter>> = [];
   private sideNavHomeActions: Array<ActionItem<{}>> = [];
+  private sideNavReadingListActions: Array<ActionItem<{}>> = [];
   private annotationActions: Array<ActionItem<Annotation>> = [];
   private clientDeviceActions: Array<ActionItem<ClientDevice>> = [];
 
@@ -66,11 +69,15 @@ export class ActionFactoryService {
     );
   }
 
-  getSeriesActions(shouldRenderFunc: ActionShouldRenderFunc<Series> = this.basicReadRender) {
+  getSeriesActions(shouldRenderFunc: ActionShouldRenderFunc<Series> = this.basicReadRender, onDeck: boolean = false) {
     return this.applyCallbackToList(
       this.seriesActions,
       (action, entity) => this.actionService.handleSeriesAction(action, entity),
-      shouldRenderFunc
+      (action, entity, user) => {
+        if (action.action === Action.RemoveFromOnDeck) return onDeck
+
+        return shouldRenderFunc(action, entity, user);
+      }
     );
   }
 
@@ -168,6 +175,19 @@ export class ActionFactoryService {
     );
   }
 
+  getSideNavReadingListActions(shouldRenderFunc: ActionShouldRenderFunc<{}> = this.basicReadRender) {
+    // If the caller doesn't pass a render function, assume that readonly users cannot perform actions
+    const renderFunc = shouldRenderFunc === this.basicReadRender
+      ? (action: ActionItem<any>, entity: any, user: User) => !this.accountService.hasReadOnlyRole()
+      : shouldRenderFunc;
+
+    return this.applyCallbackToList(
+      this.sideNavReadingListActions,
+      (action, entity) => this.actionService.handleSideNavReadingListStream(action, entity),
+      renderFunc
+    );
+  }
+
   getBulkLibraryActions(shouldRenderFunc: ActionShouldRenderFunc<Library> = this.basicReadRender) {
 
     const filteredActions = this.flattenActions<Library>(this.libraryActions).filter(a => {
@@ -257,6 +277,20 @@ export class ActionFactoryService {
 
       return flatArray;
     }, [] as Array<ActionItem<T>>); // Explicitly defining the type of flatArray
+  }
+
+  private sendToChildren() {
+    return this.settingsService.isEmailSetup().pipe(
+      switchMap(isSetup => {
+        if (!isSetup) return of([]);
+
+        return this.deviceService.devices$;
+      }),
+      map((devices: Array<Device>) => devices.map(d => {
+        return {'title': d.name, 'data': d};
+      })),
+      shareReplay(),
+    )
   }
 
 
@@ -553,9 +587,7 @@ export class ActionFactoryService {
             shouldRender: this.dummyShouldRender,
 
             requiredRoles: [],
-            dynamicList: this.deviceService.devices$.pipe(map((devices: Array<Device>) => devices.map(d => {
-              return {'title': d.name, 'data': d};
-            }), shareReplay())),
+            dynamicList: this.sendToChildren(),
             children: []
           }
         ],
@@ -604,6 +636,17 @@ export class ActionFactoryService {
 
         requiredRoles: [],
         children: [
+          {
+            action: Action.RemoveFromOnDeck,
+            title: 'remove-from-on-deck',
+            description: 'remove-from-on-deck-tooltip',
+
+            callback: this.dummyCallback,
+            shouldRender: this.dummyShouldRender,
+
+            requiredRoles: [],
+            children: [],
+          },
           {
             action: Action.RefreshMetadata,
             title: 'refresh-covers',
@@ -785,9 +828,7 @@ export class ActionFactoryService {
             shouldRender: this.dummyShouldRender,
 
             requiredRoles: [],
-            dynamicList: this.deviceService.devices$.pipe(map((devices: Array<Device>) => devices.map(d => {
-              return {'title': d.name, 'data': d};
-            }), shareReplay())),
+            dynamicList: this.sendToChildren(),
             children: []
           }
         ],
@@ -938,9 +979,7 @@ export class ActionFactoryService {
             shouldRender: this.dummyShouldRender,
 
             requiredRoles: [],
-            dynamicList: this.deviceService.devices$.pipe(map((devices: Array<Device>) => devices.map(d => {
-              return {'title': d.name, 'data': d};
-            }), shareReplay())),
+            dynamicList: this.sendToChildren(),
             children: []
           }
         ],
@@ -999,6 +1038,16 @@ export class ActionFactoryService {
         title: 'edit',
         description: 'edit-tooltip',
 
+        callback: this.dummyCallback,
+        shouldRender: this.dummyShouldRender,
+
+        requiredRoles: [],
+        children: [],
+      },
+      {
+        action: Action.RefreshMetadata,
+        title: 'refresh-covers',
+        description: 'refresh-covers-tooltip',
         callback: this.dummyCallback,
         shouldRender: this.dummyShouldRender,
 
@@ -1173,6 +1222,40 @@ export class ActionFactoryService {
 
     this.smartFilterActions = [
       {
+        action: Action.Submenu,
+        title: 'add-to',
+        description: '',
+
+        callback: this.dummyCallback,
+        shouldRender: this.dummyShouldRender,
+
+        requiredRoles: [],
+        children: [
+          {
+            action: Action.AddToDashboard,
+            title: 'add-to-dashboard',
+            description: 'add-to-dashboard-tooltip',
+
+            callback: this.dummyCallback,
+            shouldRender: this.dummyShouldRender,
+
+            requiredRoles: [],
+            children: [],
+          },
+          {
+            action: Action.AddToSideNav,
+            title: 'add-to-side-nav',
+            description: 'add-to-side-nav-tooltip',
+
+            callback: this.dummyCallback,
+            shouldRender: this.dummyShouldRender,
+
+            requiredRoles: [],
+            children: [],
+          },
+        ],
+      },
+      {
         action: Action.Edit,
         title: 'rename',
         description: 'rename-tooltip',
@@ -1200,6 +1283,19 @@ export class ActionFactoryService {
       {
         action: Action.Edit,
         title: 'reorder',
+        description: '',
+
+        callback: this.dummyCallback,
+        shouldRender: this.dummyShouldRender,
+        requiredRoles: [],
+        children: [],
+      }
+    ];
+
+    this.sideNavReadingListActions = [
+      {
+        action: Action.Navigate,
+        title: 'cbl-manager',
         description: '',
 
         callback: this.dummyCallback,

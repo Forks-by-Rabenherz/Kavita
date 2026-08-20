@@ -2,22 +2,26 @@
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Hangfire;
 using Kavita.API.Attributes;
 using Kavita.API.Database;
 using Kavita.API.Repositories;
 using Kavita.API.Services;
 using Kavita.API.Services.Reading;
 using Kavita.API.Services.ReadingLists;
+using Kavita.API.Services.SignalR;
 using Kavita.Common;
 using Kavita.Common.Helpers;
 using Kavita.Models.Constants;
+using Kavita.Models.DTOs.Filtering.v2.Requests;
 using Kavita.Models.DTOs.Person;
 using Kavita.Models.DTOs.ReadingLists;
+using Kavita.Models.DTOs.ReadingLists.Request;
+using Kavita.Models.DTOs.SignalR;
 using Kavita.Models.Entities.Enums;
 using Kavita.Server.Attributes;
 using Kavita.Server.Extensions;
 using Kavita.Services.Reading;
-using Kavita.Services.ReadingLists;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -28,7 +32,8 @@ public class ReadingListController(
     IUnitOfWork unitOfWork,
     IReadingListService readingListService,
     ILocalizationService localizationService,
-    ICblExportService  cblExportService)
+    ICblExportService  cblExportService,
+    IEventHub eventHub)
     : BaseApiController
 {
     /// <summary>
@@ -37,12 +42,13 @@ public class ReadingListController(
     /// <param name="readingListId"></param>
     /// <returns></returns>
     [HttpGet]
+    [ReadingListAccess]
     public async Task<ActionResult<ReadingListDto>> GetList(int readingListId)
     {
         var readingList = await unitOfWork.ReadingListRepository.GetReadingListDtoByIdAsync(readingListId, UserId);
         if (readingList == null)
         {
-            return BadRequest(await localizationService.Translate(UserId, "reading-list-restricted"));
+            return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-restricted"));
         }
 
         return Ok(readingList);
@@ -60,10 +66,25 @@ public class ReadingListController(
         bool includePromoted = true, bool sortByLastModified = false)
     {
         var items = await unitOfWork.ReadingListRepository.GetReadingListDtosForUserAsync(UserId, includePromoted,
-            userParams, sortByLastModified);
+            userParams, sortByLastModified, HttpContext.RequestAborted);
         Response.AddPaginationHeader(items.CurrentPage, items.PageSize, items.TotalCount, items.TotalPages);
 
         return Ok(items);
+    }
+
+    /// <summary>
+    /// Returns reading lists (paginated) for a given user.
+    /// </summary>
+    /// <param name="filter"></param>
+    /// <param name="userParams"></param>
+    /// <returns></returns>
+    [HttpPost("all")]
+    public async Task<ActionResult<PagedList<ReadingListDto>>> GetAllReadingList(ReadingListFilterDto filter, [FromQuery] UserParams userParams)
+    {
+        var list = await unitOfWork.ReadingListRepository.GetBrowseReadingListDtos(UserId, filter, userParams, HttpContext.RequestAborted);
+        Response.AddPaginationHeader(list.CurrentPage, list.PageSize, list.TotalCount, list.TotalPages);
+
+        return Ok(list);
     }
 
     /// <summary>
@@ -71,6 +92,7 @@ public class ReadingListController(
     /// </summary>
     /// <param name="seriesId"></param>
     /// <returns></returns>
+    [SeriesAccess]
     [HttpGet("lists-for-series")]
     public async Task<ActionResult<IEnumerable<ReadingListDto>>> GetListsForSeries(int seriesId)
     {
@@ -83,6 +105,7 @@ public class ReadingListController(
     /// </summary>
     /// <param name="chapterId"></param>
     /// <returns></returns>
+    [ChapterAccess]
     [HttpGet("lists-for-chapter")]
     public async Task<ActionResult<IEnumerable<ReadingListDto>>> GetListsForChapter(int chapterId)
     {
@@ -96,6 +119,7 @@ public class ReadingListController(
     /// <remarks>This call is expensive</remarks>
     /// <param name="readingListId"></param>
     /// <returns></returns>
+    [ReadingListAccess]
     [HttpGet("items")]
     public async Task<ActionResult<IList<ReadingListItemDto>>> GetListForUser(int readingListId)
     {
@@ -116,12 +140,19 @@ public class ReadingListController(
         var user = await readingListService.UserHasReadingListAccess(dto.ReadingListId, Username!);
         if (user == null)
         {
-            return BadRequest(await localizationService.Translate(UserId, "reading-list-permission"));
+            return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-permission"));
         }
-        if (await readingListService.UpdateReadingListItemPosition(dto)) return Ok(await localizationService.Translate(UserId, "reading-list-updated"));
 
+        if (!await readingListService.UpdateReadingListItemPosition(dto))
+        {
+            return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-position"));
+        }
 
-        return BadRequest(await localizationService.Translate(UserId, "reading-list-position"));
+        await eventHub.SendMessageAsync(MessageFactory.ReadingListUpdated,
+            MessageFactory.ReadingListUpdatedEvent(dto.ReadingListId), false);
+
+        return Ok(await localizationService.TranslateAsync(UserId, "reading-list-updated"));
+
     }
 
     /// <summary>
@@ -136,15 +167,18 @@ public class ReadingListController(
         var user = await readingListService.UserHasReadingListAccess(dto.ReadingListId, Username!);
         if (user == null)
         {
-            return BadRequest(await localizationService.Translate(UserId, "reading-list-permission"));
+            return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-permission"));
         }
 
-        if (await readingListService.DeleteReadingListItem(dto))
+        if (!await readingListService.DeleteReadingListItem(dto))
         {
-            return Ok(await localizationService.Translate(UserId, "reading-list-updated"));
+            return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-item-delete"));
         }
 
-        return BadRequest(await localizationService.Translate(UserId, "reading-list-item-delete"));
+        await eventHub.SendMessageAsync(MessageFactory.ReadingListUpdated,
+            MessageFactory.ReadingListUpdatedEvent(dto.ReadingListId), false);
+
+        return Ok(await localizationService.TranslateAsync(UserId, "reading-list-updated"));
     }
 
     /// <summary>
@@ -159,15 +193,17 @@ public class ReadingListController(
         var user = await readingListService.UserHasReadingListAccess(readingListId, Username!);
         if (user == null)
         {
-            return BadRequest(await localizationService.Translate(UserId, "reading-list-permission"));
+            return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-permission"));
         }
 
-        if (await readingListService.RemoveFullyReadItems(readingListId, user))
+        if (!await readingListService.RemoveFullyReadItems(readingListId, user))
         {
-            return Ok(await localizationService.Translate(UserId, "reading-list-updated"));
+            return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-item-delete"));
         }
 
-        return BadRequest(await localizationService.Translate(UserId, "reading-list-item-delete"));
+        await eventHub.SendMessageAsync(MessageFactory.ReadingListUpdated,
+            MessageFactory.ReadingListUpdatedEvent(readingListId), false);
+        return Ok(await localizationService.TranslateAsync(UserId, "reading-list-updated"));
     }
 
     /// <summary>
@@ -182,13 +218,13 @@ public class ReadingListController(
         var user = await readingListService.UserHasReadingListAccess(readingListId, Username!);
         if (user == null)
         {
-            return BadRequest(await localizationService.Translate(UserId, "reading-list-permission"));
+            return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-permission"));
         }
 
         if (await readingListService.DeleteReadingList(readingListId, user))
-            return Ok(await localizationService.Translate(UserId, "reading-list-deleted"));
+            return Ok(await localizationService.TranslateAsync(UserId, "reading-list-deleted"));
 
-        return BadRequest(await localizationService.Translate(UserId, "generic-reading-list-delete"));
+        return BadRequest(await localizationService.TranslateAsync(UserId, "generic-reading-list-delete"));
     }
 
     /// <summary>
@@ -209,7 +245,7 @@ public class ReadingListController(
         }
         catch (KavitaException ex)
         {
-            return BadRequest(await localizationService.Translate(UserId, ex.Message));
+            return BadRequest(await localizationService.TranslateAsync(UserId, ex.Message));
         }
 
         return Ok(await unitOfWork.ReadingListRepository.GetReadingListDtoByTitleAsync(user.Id, dto.Title));
@@ -222,27 +258,30 @@ public class ReadingListController(
     /// <returns></returns>
     [HttpPost("update")]
     [DisallowRole(PolicyConstants.ReadOnlyRole)]
-    public async Task<ActionResult> UpdateList(UpdateReadingListDto dto)
+    public async Task<ActionResult<ReadingListDto>> UpdateList(UpdateReadingListDto dto)
     {
-        var readingList = await unitOfWork.ReadingListRepository.GetReadingListByIdAsync(dto.ReadingListId);
-        if (readingList == null) return BadRequest(await localizationService.Translate(UserId, "reading-list-doesnt-exist"));
+        var ct = HttpContext.RequestAborted;
+        var readingList = await unitOfWork.ReadingListRepository.GetReadingListByIdAsync(dto.ReadingListId, ReadingListIncludes.Tags, ct: ct);
+        if (readingList == null) return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-doesnt-exist"));
 
         var user = await readingListService.UserHasReadingListAccess(readingList.Id, Username!);
         if (user == null)
         {
-            return BadRequest(await localizationService.Translate(UserId, "reading-list-permission"));
+            return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-permission"));
         }
 
         try
         {
             await readingListService.UpdateReadingList(readingList, dto);
+            await eventHub.SendMessageAsync(MessageFactory.ReadingListUpdated,
+                MessageFactory.ReadingListUpdatedEvent(readingList.Id), false, ct);
         }
         catch (KavitaException ex)
         {
-            return BadRequest(await localizationService.Translate(UserId, ex.Message));
+            return BadRequest(await localizationService.TranslateAsync(UserId, ex.Message));
         }
 
-        return Ok(await localizationService.Translate(UserId, "reading-list-updated"));
+        return Ok(await unitOfWork.ReadingListRepository.GetReadingListDtoByIdAsync(readingList.Id, UserId, ct));
     }
 
     /// <summary>
@@ -257,11 +296,11 @@ public class ReadingListController(
         var user = await readingListService.UserHasReadingListAccess(dto.ReadingListId, Username!);
         if (user == null)
         {
-            return BadRequest(await localizationService.Translate(UserId, "reading-list-permission"));
+            return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-permission"));
         }
 
         var readingList = user.ReadingLists.SingleOrDefault(l => l.Id == dto.ReadingListId);
-        if (readingList == null) return BadRequest(await localizationService.Translate(UserId, "reading-list-doesnt-exist"));
+        if (readingList == null) return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-doesnt-exist"));
         var chapterIdsForSeries =
             await unitOfWork.SeriesRepository.GetChapterIdsForSeriesAsync([dto.SeriesId]);
 
@@ -276,7 +315,10 @@ public class ReadingListController(
             if (unitOfWork.HasChanges())
             {
                 await unitOfWork.CommitAsync();
-                return Ok(await localizationService.Translate(UserId, "reading-list-updated"));
+                await readingListService.UpdateReadingListCoverImage(readingList);
+                await eventHub.SendMessageAsync(MessageFactory.ReadingListUpdated,
+                    MessageFactory.ReadingListUpdatedEvent(readingList.Id), false);
+                return Ok(await localizationService.TranslateAsync(UserId, "reading-list-updated"));
             }
         }
         catch
@@ -284,7 +326,7 @@ public class ReadingListController(
             await unitOfWork.RollbackAsync();
         }
 
-        return Ok(await localizationService.Translate(UserId, "nothing-to-do"));
+        return Ok(await localizationService.TranslateAsync(UserId, "nothing-to-do"));
     }
 
 
@@ -300,10 +342,10 @@ public class ReadingListController(
         var user = await readingListService.UserHasReadingListAccess(dto.ReadingListId, Username!);
         if (user == null)
         {
-            return BadRequest(await localizationService.Translate(UserId, "reading-list-permission"));
+            return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-permission"));
         }
         var readingList = user.ReadingLists.SingleOrDefault(l => l.Id == dto.ReadingListId);
-        if (readingList == null) return BadRequest(await localizationService.Translate(UserId, "reading-list-doesnt-exist"));
+        if (readingList == null) return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-doesnt-exist"));
 
         var chapterIds = await unitOfWork.VolumeRepository.GetChapterIdsByVolumeIds(dto.VolumeIds);
         foreach (var chapterId in dto.ChapterIds)
@@ -322,7 +364,10 @@ public class ReadingListController(
             if (unitOfWork.HasChanges())
             {
                 await unitOfWork.CommitAsync();
-                return Ok(await localizationService.Translate(UserId, "reading-list-updated"));
+                await readingListService.UpdateReadingListCoverImage(readingList);
+                await eventHub.SendMessageAsync(MessageFactory.ReadingListUpdated,
+                    MessageFactory.ReadingListUpdatedEvent(readingList.Id), false);
+                return Ok(await localizationService.TranslateAsync(UserId, "reading-list-updated"));
             }
         }
         catch
@@ -330,7 +375,7 @@ public class ReadingListController(
             await unitOfWork.RollbackAsync();
         }
 
-        return Ok(await localizationService.Translate(UserId, "nothing-to-do"));
+        return Ok(await localizationService.TranslateAsync(UserId, "nothing-to-do"));
     }
 
     /// <summary>
@@ -345,10 +390,10 @@ public class ReadingListController(
         var user = await readingListService.UserHasReadingListAccess(dto.ReadingListId, Username!);
         if (user == null)
         {
-            return BadRequest(await localizationService.Translate(UserId, "reading-list-permission"));
+            return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-permission"));
         }
         var readingList = user.ReadingLists.SingleOrDefault(l => l.Id == dto.ReadingListId);
-        if (readingList == null) return BadRequest(await localizationService.Translate(UserId, "reading-list-doesnt-exist"));
+        if (readingList == null) return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-doesnt-exist"));
 
         var ids = await unitOfWork.SeriesRepository.GetChapterIdWithSeriesIdForSeriesAsync(dto.SeriesIds.ToArray());
 
@@ -366,7 +411,10 @@ public class ReadingListController(
             if (unitOfWork.HasChanges())
             {
                 await unitOfWork.CommitAsync();
-                return Ok(await localizationService.Translate(UserId, "reading-list-updated"));
+                await readingListService.UpdateReadingListCoverImage(readingList);
+                await eventHub.SendMessageAsync(MessageFactory.ReadingListUpdated,
+                    MessageFactory.ReadingListUpdatedEvent(readingList.Id), false);
+                return Ok(await localizationService.TranslateAsync(UserId, "reading-list-updated"));
             }
         }
         catch
@@ -374,7 +422,7 @@ public class ReadingListController(
             await unitOfWork.RollbackAsync();
         }
 
-        return Ok(await localizationService.Translate(UserId, "nothing-to-do"));
+        return Ok(await localizationService.TranslateAsync(UserId, "nothing-to-do"));
     }
 
     [HttpPost("update-by-volume")]
@@ -384,10 +432,10 @@ public class ReadingListController(
         var user = await readingListService.UserHasReadingListAccess(dto.ReadingListId, Username!);
         if (user == null)
         {
-            return BadRequest(await localizationService.Translate(UserId, "reading-list-permission"));
+            return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-permission"));
         }
         var readingList = user.ReadingLists.SingleOrDefault(l => l.Id == dto.ReadingListId);
-        if (readingList == null) return BadRequest(await localizationService.Translate(UserId, "reading-list-doesnt-exist"));
+        if (readingList == null) return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-doesnt-exist"));
 
         var chapterIdsForVolume =
             (await unitOfWork.ChapterRepository.GetChaptersAsync(dto.VolumeId)).Select(c => c.Id).ToList();
@@ -403,7 +451,10 @@ public class ReadingListController(
             if (unitOfWork.HasChanges())
             {
                 await unitOfWork.CommitAsync();
-                return Ok(await localizationService.Translate(UserId, "reading-list-updated"));
+                await readingListService.UpdateReadingListCoverImage(readingList);
+                await eventHub.SendMessageAsync(MessageFactory.ReadingListUpdated,
+                    MessageFactory.ReadingListUpdatedEvent(readingList.Id), false);
+                return Ok(await localizationService.TranslateAsync(UserId, "reading-list-updated"));
             }
         }
         catch
@@ -411,7 +462,7 @@ public class ReadingListController(
             await unitOfWork.RollbackAsync();
         }
 
-        return Ok(await localizationService.Translate(UserId, "nothing-to-do"));
+        return Ok(await localizationService.TranslateAsync(UserId, "nothing-to-do"));
     }
 
     [HttpPost("update-by-chapter")]
@@ -421,10 +472,10 @@ public class ReadingListController(
         var user = await readingListService.UserHasReadingListAccess(dto.ReadingListId, Username!);
         if (user == null)
         {
-            return BadRequest(await localizationService.Translate(UserId, "reading-list-permission"));
+            return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-permission"));
         }
         var readingList = user.ReadingLists.SingleOrDefault(l => l.Id == dto.ReadingListId);
-        if (readingList == null) return BadRequest(await localizationService.Translate(UserId, "reading-list-doesnt-exist"));
+        if (readingList == null) return BadRequest(await localizationService.TranslateAsync(UserId, "reading-list-doesnt-exist"));
 
         // If there are adds, tell tracking this has been modified
         if (await readingListService.AddChaptersToReadingList(dto.SeriesId, new List<int>() { dto.ChapterId }, readingList))
@@ -437,7 +488,10 @@ public class ReadingListController(
             if (unitOfWork.HasChanges())
             {
                 await unitOfWork.CommitAsync();
-                return Ok(await localizationService.Translate(UserId, "reading-list-updated"));
+                await readingListService.UpdateReadingListCoverImage(readingList);
+                await eventHub.SendMessageAsync(MessageFactory.ReadingListUpdated,
+                    MessageFactory.ReadingListUpdatedEvent(readingList.Id), false);
+                return Ok(await localizationService.TranslateAsync(UserId, "reading-list-updated"));
             }
         }
         catch
@@ -445,7 +499,7 @@ public class ReadingListController(
             await unitOfWork.RollbackAsync();
         }
 
-        return Ok(await localizationService.Translate(UserId, "nothing-to-do"));
+        return Ok(await localizationService.TranslateAsync(UserId, "nothing-to-do"));
     }
 
 
@@ -489,7 +543,7 @@ public class ReadingListController(
         var items = (await unitOfWork.ReadingListRepository.GetReadingListItemsByIdAsync(readingListId)).ToList();
 
         var readingListItem = items.SingleOrDefault(rl => rl.ChapterId == currentChapterId);
-        if (readingListItem == null) return BadRequest(await localizationService.Translate(UserId, "chapter-doesnt-exist"));
+        if (readingListItem == null) return BadRequest(await localizationService.TranslateAsync(UserId, "chapter-doesnt-exist"));
 
         var index = items.IndexOf(readingListItem) + 1;
         if (items.Count > index)
@@ -513,7 +567,7 @@ public class ReadingListController(
         var items = (await unitOfWork.ReadingListRepository.GetReadingListItemsByIdAsync(readingListId)).ToList();
 
         var readingListItem = items.SingleOrDefault(rl => rl.ChapterId == currentChapterId);
-        if (readingListItem == null) return BadRequest(await localizationService.Translate(UserId, "chapter-doesnt-exist"));
+        if (readingListItem == null) return BadRequest(await localizationService.TranslateAsync(UserId, "chapter-doesnt-exist"));
 
         var index = items.IndexOf(readingListItem) - 1;
         if (0 <= index)
@@ -552,7 +606,7 @@ public class ReadingListController(
         var userId = UserId;
         if (!User.IsInRole(PolicyConstants.PromoteRole) && !User.IsInRole(PolicyConstants.AdminRole))
         {
-            return BadRequest(await localizationService.Translate(userId, "permission-denied"));
+            return BadRequest(await localizationService.TranslateAsync(userId, "permission-denied"));
         }
 
         var readingLists = await unitOfWork.ReadingListRepository.GetReadingListsByIds(dto.ReadingListIds);
@@ -626,9 +680,24 @@ public class ReadingListController(
     public async Task<ActionResult> ExportAsCbl([FromQuery] int readingListId, [FromQuery] bool asV2 = false)
     {
         var filepath = await cblExportService.ExportReadingList(readingListId, UserId,  asV2);
-        if (string.IsNullOrEmpty(filepath)) return BadRequest(localizationService.Translate(UserId, "cbl-export-failed"));
+        if (string.IsNullOrEmpty(filepath)) return BadRequest(await localizationService.TranslateAsync(UserId, "cbl-export-failed"));
 
         var contentType = asV2 ? "application/json" : "application/xml";
         return PhysicalFile(filepath, contentType, Path.GetFileName(filepath));
+    }
+
+    /// <summary>
+    /// Regenerates the cover image for a reading list, you must own the given reading list to do this
+    /// </summary>
+    /// <param name="readingListId"></param>
+    /// <returns></returns>
+    [HttpPost("regenerate-cover")]
+    [ReadingListAccess(allowPromoted: false)]
+    [DisallowRole(PolicyConstants.ReadOnlyRole)]
+    public ActionResult RegenerateCover([FromQuery] int readingListId)
+    {
+        BackgroundJob.Enqueue(() => readingListService.GenerateReadingListCoverImage(readingListId, true));
+
+        return Ok();
     }
 }

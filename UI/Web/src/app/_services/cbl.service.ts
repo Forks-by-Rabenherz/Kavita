@@ -6,9 +6,11 @@ import {CblRepoItem} from '../_models/reading-list/cbl/cbl-repo-item';
 import {CblImportSummary} from '../_models/reading-list/cbl/cbl-import-summary';
 import {CblSavedFile} from '../_models/reading-list/cbl/cbl-saved-file';
 import {CblImportDecisions} from '../_models/reading-list/cbl/cbl-import-decisions';
-import {ReadingListProvider} from '../_models/reading-list';
+import {ReadingListProvider} from '../_models/reading-list/reading-list';
 import {RemapRule} from '../_models/reading-list/cbl/remap-rule';
+import {Chapter} from '../_models/chapter';
 import {NgxFileDropEntry} from 'ngx-file-drop';
+import {TextResonse} from "../_types/text-response";
 
 @Injectable({
   providedIn: 'root',
@@ -43,13 +45,14 @@ export class CblService {
     return this.httpClient.post<CblImportSummary>(this.baseUrl + 'cbl/re-validate', {fileName});
   }
 
-  finalizeImport(fileName: string, decisions: CblImportDecisions, provider: ReadingListProvider,
+  finalizeImport(fileName: string, decisions: CblImportDecisions, provider: ReadingListProvider, promote: boolean = false,
     repoMeta?: { repoPath: string; downloadUrl: string; sha: string }) {
     return this.httpClient.post<CblImportSummary>(this.baseUrl + 'cbl/finalize-import', {
       fileName,
       decisions,
       provider,
-      ...repoMeta
+      ...repoMeta,
+      promote
     });
   }
 
@@ -65,8 +68,12 @@ export class CblService {
     });
   }
 
-  updateRemapRule(id: number, update: { volumeId?: number; chapterId?: number; cblVolume?: string; cblNumber?: string }) {
-    return this.httpClient.put<RemapRule>(this.baseUrl + 'cbl/remap-rules/' + id, update);
+  syncList(readingListId: number, force = false) {
+    return this.httpClient.post(this.baseUrl + `cbl/sync?readingListId=${readingListId}&force=${force}`, {}, TextResonse);
+  }
+
+  updateRemapRule(id: number, update: { seriesId?: number; cblSeriesName?: string; volumeId?: number; chapterId?: number; cblVolume?: string; cblNumber?: string }) {
+    return this.httpClient.post<RemapRule>(this.baseUrl + 'cbl/remap-rules/' + id, update);
   }
 
   deleteRemapRule(id: number) {
@@ -84,4 +91,14 @@ export class CblService {
   demoteRule(id: number) {
     return this.httpClient.post<RemapRule>(this.baseUrl + 'cbl/remap-rules/' + id + '/demote', {});
   }
+
+  buildChapterStub(rule: RemapRule): Chapter {
+    return {
+      volumeId: 0,
+      range: rule.chapterRange,
+      titleName: rule.chapterTitleName !== rule.chapterRange ? rule.chapterTitleName : '',
+      isSpecial: rule.chapterIsSpecial,
+    } as Chapter;
+  }
+
 }

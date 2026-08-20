@@ -8,14 +8,17 @@ using Kavita.API.Database;
 using Kavita.API.Errors;
 using Kavita.API.Repositories;
 using Kavita.API.Services;
+using Kavita.API.Services.Plus;
 using Kavita.Common;
 using Kavita.Models;
 using Kavita.Models.Builders;
 using Kavita.Models.Constants;
+using Kavita.Models.DTOs.KavitaPlus.Scrobble;
 using Kavita.Models.Entities;
 using Kavita.Models.Entities.Enums;
 using Kavita.Models.Entities.User;
 using Kavita.Models.Extensions;
+using Kavita.Services.Plus;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -70,7 +73,7 @@ public partial class AccountService(
     {
         if (string.IsNullOrWhiteSpace(username) || !AllowedUsernameRegex.IsMatch(username))
         {
-            return [new ApiException(400, "Invalid username")];
+            return [new ApiException(400, "invalid-username")];
         }
 
         // Reverted because of https://go.microsoft.com/fwlink/?linkid=2129535
@@ -79,7 +82,7 @@ public partial class AccountService(
         {
             return
             [
-                new(400, "Username is already taken")
+                new(400, "username-taken")
             ];
         }
 
@@ -121,7 +124,7 @@ public partial class AccountService(
         {
             if (identityProvider == IdentityProvider.OpenIdConnect)
             {
-                throw new KavitaException(await localizationService.Translate(actingUserId, "cannot-change-identity-provider-original-user"));
+                throw new KavitaException(await localizationService.TranslateAsync(actingUserId, "cannot-change-identity-provider-original-user"));
             }
 
             return false;
@@ -139,7 +142,7 @@ public partial class AccountService(
         // Don't allow changes to the user if they're managed by oidc, and their identity provider isn't being changed to something else
         if (user.IdentityProvider == IdentityProvider.OpenIdConnect && identityProvider == IdentityProvider.OpenIdConnect)
         {
-            throw new KavitaException(await localizationService.Translate(actingUserId, "oidc-managed"));
+            throw new KavitaException(await localizationService.TranslateAsync(actingUserId, "oidc-managed"));
         }
 
         user.IdentityProvider = identityProvider;
@@ -209,6 +212,7 @@ public partial class AccountService(
         AddDefaultStreamsToUser(user, ct);
         AddDefaultHighlightSlotsToUser(user);
         AddAuthKeys(user);
+        AddScrobbleProvidersToUser(user);
         await AddDefaultReadingProfileToUser(user, ct); // Commits
     }
 
@@ -261,6 +265,25 @@ public partial class AccountService(
         unitOfWork.AppUserReadingProfileRepository.Add(profile);
 
         await unitOfWork.CommitAsync(ct);
+    }
+
+    public static void AddScrobbleProvidersToUser(AppUser user)
+    {
+        foreach (var provider in KavitaPlusConfiguration.AllInUseScrobbleProviders)
+        {
+            user.ScrobbleProviders[provider] = new AppUserScrobbleProvider
+            {
+                Provider = provider,
+                Settings = new ScrobbleProviderSettingsDto()
+                {
+
+                    ProgressScrobbling = true,
+                    RatingScrobbling = true,
+                    WantToReadSync = true,
+                    AllLibraries = true
+                }
+            };
+        }
     }
 
     [GeneratedRegex(@"^[a-zA-Z0-9\-._@+/]*$")]

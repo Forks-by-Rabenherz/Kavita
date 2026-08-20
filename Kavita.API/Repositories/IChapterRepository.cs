@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Kavita.Models.DTOs;
+using Kavita.Models.DTOs.KavitaPlus.Scrobble;
 using Kavita.Models.DTOs.Metadata;
 using Kavita.Models.DTOs.Reader;
 using Kavita.Models.DTOs.SeriesDetail;
@@ -36,14 +37,11 @@ public interface IChapterRepository
     Task<int> GetChapterTotalPagesAsync(int chapterId, CancellationToken ct = default);
     Task<Chapter?> GetChapterAsync(int chapterId, ChapterIncludes includes = ChapterIncludes.Files, CancellationToken ct = default);
     Task<ChapterDto?> GetChapterDtoAsync(int chapterId, int userId, CancellationToken ct = default);
-    Task<IList<ChapterDto>> GetChapterDtoByIdsAsync(IEnumerable<int> chapterIds, int userId, CancellationToken ct = default);
-    Task<ChapterMetadataDto?> GetChapterMetadataDtoAsync(int chapterId, ChapterIncludes includes = ChapterIncludes.Files, CancellationToken ct = default);
     Task<IList<MangaFile>> GetFilesForChapterAsync(int chapterId, CancellationToken ct = default);
     Task<IList<Chapter>> GetChaptersAsync(int volumeId, ChapterIncludes includes = ChapterIncludes.None, CancellationToken ct = default);
-    Task<IList<ChapterDto>> GetChapterDtosAsync(int volumeId, int userId, CancellationToken ct = default);
     Task<IList<MangaFile>> GetFilesForChaptersAsync(IReadOnlyList<int> chapterIds, CancellationToken ct = default);
     Task<long> GetFilesizeAsync(int chapterId, CancellationToken ct = default);
-    Task<Dictionary<int, long>> GetFilesizesAsync(IList<int> chapterIds, CancellationToken ct = default);
+    Task<Dictionary<int, long>> GetFilesizesAsync(int userId, IList<int> chapterIds, CancellationToken ct = default);
     Task<string?> GetChapterCoverImageAsync(int chapterId, CancellationToken ct = default);
     Task<IList<string>> GetAllCoverImagesAsync(CancellationToken ct = default);
     Task<IList<Chapter>> GetAllChaptersWithCoversInDifferentEncoding(EncodeFormat format, CancellationToken ct = default);
@@ -62,12 +60,15 @@ public interface IChapterRepository
     Task<int?> GetSeriesIdForChapter(int chapterId, CancellationToken ct = default);
 
     /// <summary>
-    /// Fetches chapters matching by ComicVineId or MetronId, with Volume and Series included
+    /// Fetches chapters matching by ComicVineId or MetronId, with Volume and Series included.
+    /// If KavitaIds are passed, will prioritize over CV/Metron.
     /// </summary>
-    Task<IList<Chapter>> GetChaptersByExternalIdsAsync(IList<string> comicVineIds, IList<long> metronIds, IList<int> libraryIds, CancellationToken ct = default);
+    Task<IList<Chapter>> GetChaptersByExternalIdsAsync(IList<int> kavitaIds, IList<string> comicVineIds, IList<long> metronIds, IList<int> libraryIds, CancellationToken ct = default);
 
     /// <summary>
     /// Fetches chapters that have a non-empty AlternateSeries field from the specified libraries
     /// </summary>
     Task<IList<Chapter>> GetChaptersByAlternateSeriesAsync(IList<string> normalizedNames, IList<int> libraryIds, CancellationToken ct = default);
+
+    Task<List<Chapter>> GetChaptersForReadStatusTransitionRuleAsync(int userId, ReadStatusTransitionRule rule, CancellationToken ct = default);
 }

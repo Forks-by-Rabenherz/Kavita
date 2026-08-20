@@ -103,7 +103,7 @@ public class ServerController(
         logger.LogInformation("{UserName} is performing file analysis from admin dashboard", Username!);
         if (TaskScheduler.HasAlreadyEnqueuedTask(ScannerService.Name, "AnalyzeFiles",
                 [], TaskScheduler.DefaultQueue, true))
-            return Ok(await localizationService.Translate(UserId, "job-already-running"));
+            return Ok(await localizationService.TranslateAsync(UserId, "job-already-running"));
 
         BackgroundJob.Enqueue(() => scannerService.AnalyzeFiles());
         return Ok();
@@ -132,7 +132,7 @@ public class ServerController(
         var encoding = (await unitOfWork.SettingsRepository.GetSettingsDtoAsync()).EncodeMediaAs;
         if (encoding == EncodeFormat.PNG)
         {
-            return BadRequest(await localizationService.Translate(UserId, "encode-as-warning"));
+            return BadRequest(await localizationService.TranslateAsync(UserId, "encode-as-warning"));
         }
 
         taskScheduler.ConvertAllCoversToEncoding();
@@ -156,7 +156,7 @@ public class ServerController(
         }
         catch (KavitaException ex)
         {
-            return BadRequest(await localizationService.Translate(UserId, ex.Message));
+            return BadRequest(await localizationService.TranslateAsync(UserId, ex.Message));
         }
     }
 
@@ -213,7 +213,7 @@ public class ServerController(
             new JobDto()
             {
                 Id = dto.Id,
-                Title = await localizationService.Translate(UserId, dto.Id),
+                Title = await localizationService.TranslateAsync(UserId, dto.Id),
                 Cron = dto.Cron,
                 LastExecutionUtc = dto.LastExecution.HasValue ? new DateTime(dto.LastExecution.Value.Ticks, DateTimeKind.Utc) : null
             });
@@ -227,9 +227,9 @@ public class ServerController(
     /// <returns></returns>
     [Authorize(PolicyGroups.AdminPolicy)]
     [HttpGet("media-errors")]
-    public ActionResult<PagedList<MediaErrorDto>> GetMediaErrors()
+    public async Task<ActionResult<IList<MediaErrorDto>>> GetMediaErrors()
     {
-        return Ok(unitOfWork.MediaErrorRepository.GetAllErrorDtosAsync());
+        return Ok(await unitOfWork.MediaErrorRepository.GetAllErrorDtosAsync());
     }
 
     /// <summary>
@@ -269,6 +269,24 @@ public class ServerController(
     {
         await themeService.SyncThemes();
         return Ok();
+    }
+
+    /// <summary>
+    /// Returns true if a task is currently running or has been queued. Can be scoped to a queue, default to the default queue
+    /// </summary>
+    /// <param name="methodName"></param>
+    /// <param name="queue"></param>
+    /// <returns></returns>
+    [Authorize(PolicyGroups.AdminPolicy)]
+    [HttpGet("is-task-running")]
+    public ActionResult<bool> HasRunningOrQueuedTask([FromQuery] string methodName, [FromQuery] string? queue = null)
+    {
+        if (string.IsNullOrEmpty(queue))
+        {
+            return Ok(TaskScheduler.IsMethodRunningOrEnqueued(methodName));
+        }
+
+        return Ok(TaskScheduler.IsMethodRunningOrEnqueued(methodName, queue));
     }
 
 }

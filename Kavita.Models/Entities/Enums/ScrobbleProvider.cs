@@ -13,8 +13,7 @@ public enum ScrobbleProvider
     Kavita = 0,
     AniList = 1,
     Mal = 2,
-    [Obsolete("No longer supported")]
-    GoogleBooks = 3,
     Cbr = 4,
     Hardcover = 5,
+    MangaBaka = 6
 }

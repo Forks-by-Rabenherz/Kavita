@@ -3,7 +3,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AutoMapper;
-using AutoMapper.QueryableExtensions;
 using Kavita.API.Repositories;
 using Kavita.Models.DTOs.KavitaPlus.Metadata;
 using Kavita.Models.DTOs.Settings;
@@ -33,17 +32,6 @@ public class SettingsRepository(DataContext context, IMapper mapper) : ISettings
         context.MetadataFieldMapping.RemoveRange(fieldMappings);
     }
 
-    public void Remove(ServerSetting setting)
-    {
-        context.Remove(setting);
-    }
-
-    public async Task<ExternalSeriesMetadata?> GetExternalSeriesMetadata(int seriesId, CancellationToken ct = default)
-    {
-        return await context.ExternalSeriesMetadata
-            .Where(s => s.SeriesId == seriesId)
-            .FirstOrDefaultAsync(ct);
-    }
 
     public async Task<MetadataSettings> GetMetadataSettings(CancellationToken ct = default)
     {
@@ -54,10 +42,12 @@ public class SettingsRepository(DataContext context, IMapper mapper) : ISettings
 
     public async Task<MetadataSettingsDto> GetMetadataSettingDto(CancellationToken ct = default)
     {
-        return await context.MetadataSettings
+        var settings = await context.MetadataSettings
             .Include(m => m.FieldMappings)
-            .ProjectTo<MetadataSettingsDto>(mapper.ConfigurationProvider)
             .FirstAsync(ct);
+
+        // AutoMapper can't do KeyValuePair in the DB layer, have to do in mem
+        return mapper.Map<MetadataSettingsDto>(settings);
     }
 
     public async Task<ServerSettingDto> GetSettingsDtoAsync(CancellationToken ct = default)

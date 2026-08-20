@@ -4,6 +4,7 @@ using Kavita.Models.DTOs.Common;
 using Kavita.Models.DTOs.Metadata;
 using Kavita.Models.DTOs.Person;
 using Kavita.Models.Entities.Enums;
+using System.ComponentModel.DataAnnotations;
 
 namespace Kavita.Models.DTOs;
 
@@ -40,11 +41,12 @@ public sealed record UpdateChapterDto : IUpdateExternalMetadataIds
     /// <summary>
     /// Highest Age Rating from all Chapters
     /// </summary>
+    [EnumDataType(typeof(AgeRating))]
     public AgeRating AgeRating { get; set; } = AgeRating.Unknown;
     /// <summary>
     /// Language of the content (BCP-47 code)
     /// </summary>
-    public string Language { get; set; } = string.Empty;
+    public string? Language { get; set; } = string.Empty;
 
 
     /// <summary>
@@ -101,5 +103,6 @@ public sealed record UpdateChapterDto : IUpdateExternalMetadataIds
     public int? HardcoverId { get; set; }
     public long? MetronId { get; set; }
     public string? ComicVineId { get; set; }
-    public long? MangaBakaId { get; set; }
+    public int? MangaBakaId { get; set; }
+    public int? CbrId { get; set; }
 }

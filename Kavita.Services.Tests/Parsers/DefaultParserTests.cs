@@ -1,5 +1,6 @@
 ﻿using System.IO.Abstractions.TestingHelpers;
 using Kavita.Models.Entities.Enums;
+using Kavita.Models.Metadata;
 using Kavita.Models.Parser;
 using Kavita.Services.Scanner;
 using Microsoft.Extensions.Logging;
@@ -20,7 +21,49 @@ public class DefaultParserTests
         _defaultParser = new BasicParser(directoryService, new ImageParser(directoryService));
     }
 
+    #region ParseExternalIdsFromNotesAndWeblinks
 
+    [Theory]
+    [InlineData("Scraped metadata from ComicVine [CVDB734524]", "734524")]
+    public void ParseExternalIdsFromNotesAndWeblinks_NoteTests(string noteUrl, string? expectedOutput)
+    {
+        // This method just needs notes and weblinks
+        var parserInfo = new ParserInfo
+        {
+            Series = "Test",
+            ComicInfo = new ComicInfo()
+            {
+                Notes = noteUrl
+            }
+        };
+
+        DefaultParser.ParseExternalIdsFromNotesAndWeblinks(parserInfo);
+
+        Assert.Equal(expectedOutput, parserInfo.ComicVineId);
+    }
+
+    [Theory]
+    [InlineData("https://comicvine.gamespot.com/batman-the-caped-crusader/4050-112794/", "112794", null)]
+    [InlineData("https://comicvine.gamespot.com/batman-the-caped-crusader-6-volume-6/4000-907546/", null, "907546")]
+    public void ParseExternalIdsFromNotesAndWeblinks_WeblinkTests(string weblink, string? expectedSeriesId, string? expectedIssueId)
+    {
+        // This method just needs notes and weblinks
+        var parserInfo = new ParserInfo
+        {
+            Series = "Test",
+            ComicInfo = new ComicInfo()
+            {
+                Web = weblink
+            }
+        };
+
+        DefaultParser.ParseExternalIdsFromNotesAndWeblinks(parserInfo);
+
+        Assert.Equal(expectedIssueId, parserInfo.ComicVineId);
+        Assert.Equal(expectedSeriesId, parserInfo.ComicVineSeriesId);
+    }
+
+    #endregion
 
 
     #region ParseFromFallbackFolders
@@ -373,11 +416,10 @@ public class DefaultParserTests
         var parser = new BasicParser(ds, new ImageParser(ds));
 
         var filepath = @"E:/Manga/Foo 50/Foo 50 v1.cbz";
-        // There is a bad parse for series like "Foo 50", so we have parsed chapter as 50
         var expected = new ParserInfo
         {
             Series = "Foo 50", Volumes = "1",
-            Chapters = "50", Filename = "Foo 50 v1.cbz", Format = MangaFormat.Archive,
+            Chapters = Parser.DefaultChapter, Filename = "Foo 50 v1.cbz", Format = MangaFormat.Archive,
             FullFilePath = filepath
         };
 

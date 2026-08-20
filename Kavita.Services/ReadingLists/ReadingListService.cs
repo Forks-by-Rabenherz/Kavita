@@ -14,6 +14,7 @@ using Kavita.Common.Extensions;
 using Kavita.Common.Helpers;
 using Kavita.Models.Builders;
 using Kavita.Models.DTOs.ReadingLists;
+using Kavita.Models.DTOs.ReadingLists.Request;
 using Kavita.Models.DTOs.SignalR;
 using Kavita.Models.Entities;
 using Kavita.Models.Entities.Enums;
@@ -21,6 +22,7 @@ using Kavita.Models.Entities.ReadingLists;
 using Kavita.Models.Entities.User;
 using Kavita.Models.Extensions;
 using Kavita.Models.Helpers;
+using Kavita.Services.Helpers;
 using Kavita.Services.Reading;
 using Kavita.Services.Scanner;
 using Microsoft.Extensions.Logging;
@@ -84,6 +86,13 @@ public class ReadingListService(
         readingList.NormalizedTitle = Parser.Normalize(readingList.Title);
         readingList.Promoted = dto.Promoted;
         readingList.CoverImageLocked = dto.CoverImageLocked;
+
+        if (readingList.Tags == null)
+        {
+            throw new ArgumentException("You must pass a Reading List with tags included");
+        }
+
+        await TagHelper.UpdateEntityTags(readingList.Tags, dto.Tags, unitOfWork.DataContext.ReadingListTag, unitOfWork, false);
 
 
         if (NumberHelper.IsValidMonth(dto.StartingMonth) || dto.StartingMonth == 0)
@@ -248,7 +257,7 @@ public class ReadingListService(
     /// <param name="seriesIds">The series ids of all the reading list items</param>
     private async Task CalculateReadingListAgeRating(ReadingList readingList, IEnumerable<int> seriesIds)
     {
-        var ageRating = await unitOfWork.SeriesRepository.GetMaxAgeRatingFromSeriesAsync(seriesIds);
+        var ageRating = await unitOfWork.SeriesRepository.GetMaxAgeRatingFromSeriesAsyncAsync(seriesIds);
         readingList.AgeRating = ageRating;
     }
 
@@ -441,33 +450,60 @@ public class ReadingListService(
     }
 
 
-    public async Task<string> GenerateReadingListCoverImage(int readingListId)
+    public async Task<string> GenerateReadingListCoverImage(int readingListId, bool commit = false)
     {
-        // TODO: Currently reading lists are dynamically generated at runtime. This needs to be overhauled to be generated and stored within
-        // the Reading List (and just expire every so often) so we can utilize ColorScapes.
-        // Check if a cover already exists for the reading list
-        // var potentialExistingCoverPath = _directoryService.FileSystem.Path.Join(_directoryService.CoverImageDirectory,
-        //     ImageService.GetReadingListFormat(readingListId));
-        // if (_directoryService.FileSystem.File.Exists(potentialExistingCoverPath))
-        // {
-        //     // Check if we need to update CoverScape
-        //
-        // }
+        var readingList = await unitOfWork.ReadingListRepository.GetReadingListByIdAsync(readingListId);
+        if (readingList == null) return string.Empty;
 
-        var covers = await unitOfWork.ReadingListRepository.GetRandomCoverImagesAsync(readingListId);
-        var destFile = directoryService.FileSystem.Path.Join(directoryService.TempDirectory,
-            ImageService.GetReadingListFormat(readingListId));
+        var path =  await GenerateReadingListCoverImage(readingList);
+
+        if (!commit) return path;
+
+        await unitOfWork.CommitAsync();
+
+        await eventHub.SendMessageAsync(MessageFactory.CoverUpdate,
+            MessageFactory.CoverUpdateEvent(readingListId, MessageFactoryEntityTypes.ReadingList), false);
+
+        return path;
+    }
+
+    public async Task<string> GenerateReadingListCoverImage(ReadingList readingList)
+    {
+        var covers = await unitOfWork.ReadingListRepository.GetRandomCoverImagesAsync(readingList.Id);
+        if (covers.Count == 0) return string.Empty;
+
         var settings = await unitOfWork.SettingsRepository.GetSettingsDtoAsync();
-        destFile += settings.EncodeMediaAs.GetExtension();
+        var fileName = ImageService.GetReadingListFormat(readingList.Id);
+        var destFile = directoryService.FileSystem.Path.Join(directoryService.CoverImageDirectory,
+            fileName + settings.EncodeMediaAs.GetExtension());
 
-        if (directoryService.FileSystem.File.Exists(destFile)) return destFile;
         ImageService.CreateMergedImage(
             covers.Select(c => directoryService.FileSystem.Path.Join(directoryService.CoverImageDirectory, c)).ToList(),
             settings.CoverImageSize,
             destFile);
-        // TODO: Refactor this so that reading lists have a dedicated cover image so we can calculate primary/secondary colors
 
-        return !directoryService.FileSystem.File.Exists(destFile) ? string.Empty : destFile;
+        if (!directoryService.FileSystem.File.Exists(destFile)) return string.Empty;
+
+        readingList.CoverImage = fileName + settings.EncodeMediaAs.GetExtension();
+        imageService.UpdateColorScape(readingList);
+
+        return readingList.CoverImage;
+    }
+
+    /// <summary>
+    /// Generates a cover image for the reading list if it has more than 3 items and doesn't already have a locked/set cover.
+    /// </summary>
+    /// <remarks>Commits changes if a cover was generated</remarks>
+    public async Task UpdateReadingListCoverImage(ReadingList readingList)
+    {
+        if (readingList.CoverImageLocked || !string.IsNullOrEmpty(readingList.CoverImage)) return;
+        if (readingList.Items == null || readingList.Items.Count < 4) return;
+
+        var coverImage = await GenerateReadingListCoverImage(readingList);
+        if (!string.IsNullOrEmpty(coverImage))
+        {
+            await unitOfWork.CommitAsync();
+        }
     }
 
     public async Task UpdateReadingListAgeRatingForSeries(int seriesId, AgeRating ageRating)
@@ -478,7 +514,7 @@ public class ReadingListService(
             var seriesIds = readingList.Items.Select(item => item.SeriesId).ToList();
             seriesIds.Remove(seriesId); // Don't get AgeRating from database
 
-            var maxAgeRating = await unitOfWork.SeriesRepository.GetMaxAgeRatingFromSeriesAsync(seriesIds);
+            var maxAgeRating = await unitOfWork.SeriesRepository.GetMaxAgeRatingFromSeriesAsyncAsync(seriesIds);
             if (ageRating > maxAgeRating)
             {
                 maxAgeRating = ageRating;

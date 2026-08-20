@@ -6,12 +6,13 @@ import {
   effect,
   inject,
   Input,
-  OnInit
+  OnInit,
+  signal
 } from '@angular/core';
 import {UtilityService} from "../../shared/_services/utility.service";
 import {FormControl, FormGroup, FormsModule, ReactiveFormsModule, Validators} from "@angular/forms";
 import {NgClass, NgTemplateOutlet, TitleCasePipe} from "@angular/common";
-import {NgbActiveModal, NgbNav, NgbNavContent, NgbNavItem, NgbNavLink, NgbNavOutlet} from "@ng-bootstrap/ng-bootstrap";
+import {NgbActiveModal} from "@ng-bootstrap/ng-bootstrap";
 import {TranslocoDirective} from "@jsverse/transloco";
 import {AccountService} from "../../_services/account.service";
 import {Chapter} from "../../_models/chapter";
@@ -27,7 +28,6 @@ import {UploadService} from "../../_services/upload.service";
 import {MetadataService} from "../../_services/metadata.service";
 import {ActionService} from "../../_services/action.service";
 import {DownloadService} from '../../shared/_services/download.service';
-import {DownloadEntityType} from '../../shared/_models/download-queue-item';
 import {SettingItemComponent} from "../../settings/_components/setting-item/setting-item.component";
 import {TypeaheadComponent} from "../../typeahead/_components/typeahead.component";
 import {concat, forkJoin, Observable, of, tap} from "rxjs";
@@ -35,6 +35,10 @@ import {map} from "rxjs/operators";
 import {EntityTitleComponent} from "../../cards/entity-title/entity-title.component";
 import {SettingButtonComponent} from "../../settings/_components/setting-button/setting-button.component";
 import {CoverImageChooserComponent} from "../../cards/cover-image-chooser/cover-image-chooser.component";
+import {
+  CoverChooserConfigFactoryService,
+  CoverImageChooserConfig
+} from "../../_services/cover-chooser-config-factory.service";
 import {takeUntilDestroyed} from "@angular/core/rxjs-interop";
 import {CompactNumberPipe} from "../../_pipes/compact-number.pipe";
 import {MangaFormat} from "../../_models/manga-format";
@@ -52,10 +56,14 @@ import {Action} from "../../_models/actionables/action";
 import {ActionFactoryService} from "../../_services/action-factory.service";
 import {modalDeleted, modalSaved} from "../../_models/modal/modal-result";
 import {Tabs} from "../../_models/tabs";
-import {TabTitlePipe} from "../../_pipes/tab-title.pipe";
 import {
+  addMetadataIdControls,
   EditExternalMetadataFormComponent
 } from "../../shared/_components/edit-external-metadata-form/edit-external-metadata-form.component";
+import {NULL_DATE} from "../../_pipes/date-year-range.pipe";
+import {DownloadEntityType} from "../../shared/_models/download-queue-item";
+import {EditModalShellComponent} from "../../shared/edit-modal-shell/edit-modal-shell.component";
+import {EditTabDirective} from "../../shared/_directive/edit-tab.directive";
 
 
 const blackList = [Action.Edit, Action.IncognitoRead, Action.AddToReadingList];
@@ -64,13 +72,8 @@ const blackList = [Action.Edit, Action.IncognitoRead, Action.AddToReadingList];
   selector: 'app-edit-chapter-modal',
   imports: [
     FormsModule,
-    NgbNav,
-    NgbNavContent,
-    NgbNavLink,
     TranslocoDirective,
-    NgbNavOutlet,
     ReactiveFormsModule,
-    NgbNavItem,
     SettingItemComponent,
     NgTemplateOutlet,
     NgClass,
@@ -86,8 +89,9 @@ const blackList = [Action.Edit, Action.IncognitoRead, Action.AddToReadingList];
     ImageComponent,
     SafeHtmlPipe,
     ReadTimePipe,
-    TabTitlePipe,
     EditExternalMetadataFormComponent,
+    EditModalShellComponent,
+    EditTabDirective,
   ],
   templateUrl: './edit-chapter-modal.component.html',
   styleUrl: './edit-chapter-modal.component.scss',
@@ -108,6 +112,7 @@ export class EditChapterModalComponent implements OnInit {
   private readonly downloadService = inject(DownloadService);
   private readonly chapterService = inject(ChapterService);
   protected readonly breakpointService = inject(BreakpointService);
+  private readonly coverChooserConfigFactory = inject(CoverChooserConfigFactoryService);
 
   @Input({required: true}) chapter!: Chapter;
   @Input({required: true}) libraryType!: LibraryType;
@@ -118,6 +123,9 @@ export class EditChapterModalComponent implements OnInit {
   editForm: FormGroup = new FormGroup({});
   selectedCover: string = '';
   coverImageReset = false;
+  coverImageDirty = false;
+  chooserConfig = signal<CoverImageChooserConfig>({});
+
 
   tagsSettings: TypeaheadSettings<Tag> = new TypeaheadSettings();
   languageSettings: TypeaheadSettings<Language> | null = null;
@@ -134,7 +142,6 @@ export class EditChapterModalComponent implements OnInit {
    * A copy of the chapter from init. This is used to compare values for name fields to see if lock was modified
    */
   initChapter!: Chapter;
-  imageUrls: Array<string> = [];
   size: number = 0;
 
   get WebLinks() {
@@ -154,9 +161,10 @@ export class EditChapterModalComponent implements OnInit {
 
   ngOnInit() {
     this.initChapter = Object.assign({}, this.chapter);
-    this.imageUrls.push(this.imageService.getChapterCoverImage(this.chapter.id));
 
-    this.size = this.utilityService.asChapter(this.chapter).files.reduce((sum, v) => sum + v.bytes, 0);
+    this.size = (<Chapter>this.chapter).files.reduce((sum, v) => sum + v.bytes, 0);
+
+    this.chooserConfig.set(this.coverChooserConfigFactory.forChapter(this.chapter, this.libraryType, this.seriesId));
 
     this.editForm.addControl('titleName', new FormControl(this.chapter.titleName, []));
     this.editForm.addControl('sortOrder', new FormControl(Math.max(0, this.chapter.sortOrder), [Validators.required, Validators.min(0)]));
@@ -164,8 +172,9 @@ export class EditChapterModalComponent implements OnInit {
     this.editForm.addControl('language', new FormControl(this.chapter.language, []));
     this.editForm.addControl('isbn', new FormControl(this.chapter.isbn, []));
     this.editForm.addControl('ageRating', new FormControl(this.chapter.ageRating, []));
+    addMetadataIdControls(this.editForm, this.chapter);
 
-    if (this.chapter.releaseDate !== '0001-01-01T00:00:00') {
+    if (this.chapter.releaseDate !== NULL_DATE) {
       this.editForm.addControl('releaseDate', new FormControl(this.chapter.releaseDate.substring(0, 10), []));
     } else {
       this.editForm.addControl('releaseDate', new FormControl('', []));
@@ -176,7 +185,6 @@ export class EditChapterModalComponent implements OnInit {
     this.editForm.addControl('tags', new FormControl(this.chapter.tags, []));
 
 
-    this.editForm.addControl('coverImageIndex', new FormControl(0, []));
     this.editForm.addControl('coverImageLocked', new FormControl(this.chapter.coverImageLocked, []));
 
     this.metadataService.getAllValidLanguages().pipe(
@@ -227,16 +235,19 @@ export class EditChapterModalComponent implements OnInit {
 
 
   close() {
-    this.modal.dismiss();
+    if (this.coverImageReset) {
+      this.modal.close(modalSaved(this.chapter, true));
+    } else {
+      this.modal.dismiss();
+    }
   }
 
   save() {
     const model = this.editForm.getRawValue();
-    const selectedIndex = this.editForm.get('coverImageIndex')?.value || 0;
 
     // Patch in data from the model that is not typeahead (as those are updated during setting)
     if (model.releaseDate === '') {
-      this.chapter.releaseDate = '0001-01-01T00:00:00';
+      this.chapter.releaseDate = NULL_DATE;
     } else {
       this.chapter.releaseDate = model.releaseDate + 'T00:00:00';
     }
@@ -251,18 +262,19 @@ export class EditChapterModalComponent implements OnInit {
     this.chapter.malId = model.malId;
     this.chapter.hardcoverId = model.hardcoverId;
     this.chapter.metronId = model.metronId;
+    this.chapter.language = model.language;
 
 
     const apis = [
       this.chapterService.updateChapter(this.chapter)
     ];
 
-    if (selectedIndex > 0 || this.coverImageReset) {
-      apis.push(this.uploadService.updateChapterCoverImage(this.chapter.id, this.selectedCover, !this.coverImageReset));
+    const needsCoverUpdate = this.coverImageDirty || this.coverImageReset;
+    if (this.coverImageDirty) {
+      apis.push(this.uploadService.updateChapterCoverImage(this.chapter.id, this.selectedCover, true));
     }
 
     concat(...apis).subscribe(results => {
-      const needsCoverUpdate = selectedIndex > 0 || this.coverImageReset;
       this.modal.close(modalSaved(model, needsCoverUpdate));
     });
   }
@@ -275,6 +287,7 @@ export class EditChapterModalComponent implements OnInit {
   }
 
   async runTask(action: ActionItem<Chapter>) {
+    // TODO: Bug: Not properly implemented
     switch (action.action) {
 
       case Action.MarkAsRead:
@@ -483,28 +496,27 @@ export class EditChapterModalComponent implements OnInit {
     this.cdRef.markForCheck();
   }
 
-  updateSelectedIndex(index: number) {
-    this.editForm.patchValue({
-      coverImageIndex: index
-    });
-    this.cdRef.markForCheck();
-  }
-
-  updateSelectedImage(url: string) {
-    this.selectedCover = url;
+  handleCoverChanged(event: { isDirty: boolean; fileName: string }) {
+    this.coverImageDirty = event.isDirty;
+    this.selectedCover = event.fileName;
     this.cdRef.markForCheck();
   }
 
   handleReset() {
     this.coverImageReset = true;
-    this.editForm.patchValue({
-      coverImageLocked: false
-    });
-    this.cdRef.markForCheck();
+    this.editForm.patchValue({ coverImageLocked: false });
+    this.chooserConfig.set({ ...this.chooserConfig(), isLocked: false });
   }
 
   getPersonsSettings(role: PersonRole) {
     return this.peopleSettings[role];
+  }
+
+  changeTab(tab?: Tabs) {
+    if (tab) {
+      this.activeId = tab;
+      this.cdRef.markForCheck();
+    }
   }
 
   protected readonly Tabs = Tabs;

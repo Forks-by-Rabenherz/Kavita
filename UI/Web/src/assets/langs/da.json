@@ -50,7 +50,6 @@
         "not-applicable": "Ikke relevant",
         "processed": "Forarbejdet",
         "not-processed": "Ikke behandlet",
-        "generate-scrobble-events": "Backfill-begivenheder",
         "token-expired": "Dit AniList-token er udløbet! Scrobbling-begivenheder vil ikke blive behandlet, før du fornyer det på siden Konti.",
         "scrobbling-disabled": "Scrobbling er deaktiveret i dine kontoindstillinger."
     },
@@ -143,8 +142,6 @@
         "download": "{{changelog.download}}",
         "apply": "{{common.apply}}",
         "delete": "{{common.delete}}",
-        "drag-n-drop": "{{cover-image-chooser.drag-n-drop}}",
-        "upload": "{{cover-image-chooser.upload}}",
         "add": "{{common.add}}",
         "description": "Kavita findes i mange farver. Find et farveskema, der passer til dine behov, eller lav dit eget og del det. Temaer kan anvendes på din konto eller på alle konti.",
         "set-default": "Indstil standard",
@@ -313,7 +310,6 @@
         "penciller": "Penciller",
         "publisher": "Udgiver",
         "writer": "Forfatter",
-        "other": "Andet",
         "imprint": "Aftryk",
         "translator": "Oversætter"
     },
@@ -339,7 +335,6 @@
     },
     "all-filters": {
         "count": "{{count}} {{customize-dashboard-modal.title-smart-filters}}",
-        "create": "{{common.create}}",
         "title": "Alle smarte filtre"
     },
     "invite-user": {
@@ -353,15 +348,6 @@
     "library-selector": {
         "select-all": "{{common.select-all}}",
         "deselect-all": "{{common.deselect-all}}"
-    },
-    "license": {
-        "cancel": "{{common.cancel}}",
-        "edit": "{{common.edit}}",
-        "loading": "{{common.loading}}",
-        "activate-email-label": "{{common.email}}",
-        "activate-delete": "{{common.delete}}",
-        "activate-reset": "{{common.reset}}",
-        "activate-save": "{{common.save}}"
     },
     "book-line-overlay": {
         "close": "{{common.close}}",
@@ -530,8 +516,7 @@
     "manage-tasks-settings": {
         "reset-to-default": "{{common.reset-to-default}}",
         "reset": "{{common.reset}}",
-        "save": "{{common.save}}",
-        "required": "{{validation.required-field}}"
+        "save": "{{common.save}}"
     },
     "edit-collection-tags": {
         "required-field": "{{validation.required-field}}",
@@ -815,7 +800,6 @@
         "auto-login-label": "Automatisk login",
         "auto-login-tooltip": "Automatisk omdirigering til OIDC-udbyder, når login-skærmen åbnes",
         "disable-password-authentication-label": "Deaktiver adgangskodegodkendelse",
-        "disable-password-authentication-tooltip": "Brugere med administratorrolle kan omgå denne begrænsning",
         "provider-name-label": "Udbyderens navn",
         "provider-name-tooltip": "Navn vist på login-skærmen",
         "defaults-title": "Standardindstillinger",
@@ -931,17 +915,12 @@
     },
     "font-manager": {
         "description": "Kavitas epub-læser leveres med et par indbyggede skrifttyper. Tilføj dine egne skrifttyper her. Upload en fil, eller brug en Google Fonts-URL. Se <a href='{{wikiLink}}' target='_blank' rel='noreferrer noopener'> wiki</a>for mere information.",
-        "enter-an-url-pre-title": "Indtast en {{url}}",
-        "url": "url",
         "add": "{{common.add}}",
         "drag-n-drop": "{{cover-image-chooser.drag-n-drop}}",
         "upload": "{{cover-image-chooser.upload}}",
         "upload-continued": "en fontfil",
         "preview-default": "Upload din egen skrifttype via fil eller Google Font-url",
         "delete": "{{common.delete}}",
-        "url-label": "Url",
-        "back": "Tilbage",
-        "load": "Belastning",
         "no-preview": "IndlæsDenne skrifttype kan ikke forhåndsvises. Den vil bruge standardstilen fra bogen.",
         "brown-fox": "Den hurtige brune ræv springer over den dovne hund",
         "filter-system-fonts-label": "Filtersystemskrifttyper"

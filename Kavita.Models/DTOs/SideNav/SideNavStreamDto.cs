@@ -1,4 +1,6 @@
-﻿using Kavita.Models.Entities;
+﻿using Kavita.Models.DTOs.Filtering.v2;
+using Kavita.Models.Entities;
+using System.ComponentModel.DataAnnotations;
 
 namespace Kavita.Models.DTOs.SideNav;
 #nullable enable
@@ -29,6 +31,7 @@ public sealed record SideNavStreamDto
     /// <summary>
     /// For system provided
     /// </summary>
+    [EnumDataType(typeof(SideNavStreamType))]
     public SideNavStreamType StreamType { get; set; }
     public bool Visible { get; set; }
     public int? LibraryId { get; set; }
@@ -36,4 +39,9 @@ public sealed record SideNavStreamDto
     /// Only available for SideNavStreamType.Library
     /// </summary>
     public LibraryDto? Library { get; set; }
+    /// <summary>
+    /// For Smart Filters, this is the underlying FilterEntityType
+    /// </summary>
+    [EnumDataType(typeof(FilterEntityType))]
+    public FilterEntityType EntityType { get; set; }
 }

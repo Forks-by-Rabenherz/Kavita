@@ -19,6 +19,7 @@ import {AsyncPipe, NgClass, NgStyle, PercentPipe} from '@angular/common';
 import {ActivatedRoute, Router} from '@angular/router';
 import {
   BehaviorSubject,
+  concat,
   debounceTime,
   distinctUntilChanged,
   filter,
@@ -35,7 +36,6 @@ import {ChangeContext, LabelType, NgxSliderModule, Options} from '@angular-slide
 import {FormBuilder, FormControl, FormGroup, ReactiveFormsModule} from '@angular/forms';
 import {NgbTooltip} from '@ng-bootstrap/ng-bootstrap';
 import {ToastrService} from 'ngx-toastr';
-import {ShortcutsModalComponent} from 'src/app/reader-shared/_modals/shortcuts-modal/shortcuts-modal.component';
 import {Stack} from 'src/app/shared/data-structures/stack';
 import {UtilityService} from 'src/app/shared/_services/utility.service';
 import {LibraryType} from 'src/app/_models/library/library';
@@ -80,8 +80,6 @@ import {ConfirmService} from "../../../shared/confirm.service";
 import {PageBookmark} from "../../../_models/readers/page-bookmark";
 import {KeyBindEvent, KeyBindService} from "../../../_services/key-bind.service";
 import {KeyBindTarget} from "../../../_models/preferences/preferences";
-import {mediumModal} from "../../../_models/modal/modal-options";
-import {ModalService, TypedModalRef} from "../../../_services/modal.service";
 import {EntityTitleService} from "../../../_services/entity-title.service";
 
 
@@ -106,6 +104,26 @@ enum KeyDirection {
   Down = 3
 }
 
+const KEYBIND_TARGETS = [
+  {keyBindTarget: KeyBindTarget.PageLeft, description: 'prev-page'},
+  {keyBindTarget: KeyBindTarget.PageRight, description: 'next-page'},
+  {keyBindTarget: KeyBindTarget.PageUp, description: 'next-page'},
+  {keyBindTarget: KeyBindTarget.PageDown, description: 'prev-page'},
+  {keyBindTarget: KeyBindTarget.GoTo, description: 'go-to'},
+  {keyBindTarget: KeyBindTarget.ToggleFullScreen},
+  {keyBindTarget: KeyBindTarget.ToggleMenu},
+  {keyBindTarget: KeyBindTarget.OpenHelp},
+  {keyBindTarget: KeyBindTarget.Escape},
+  {keyBindTarget: KeyBindTarget.BookmarkPage, description: 'bookmark'},
+  {keyBindTarget: KeyBindTarget.OffsetDoublePage, description: 'offset-double-page'},
+  {keyBindTarget: KeyBindTarget.PreviousChapter, description: 'previous-chapter'},
+  {keyBindTarget: KeyBindTarget.NextChapter, description: 'next-chapter'},
+  {keyBindTarget: KeyBindTarget.FirstPage, description: 'first-page'},
+  {keyBindTarget: KeyBindTarget.LastPage, description: 'last-page'},
+  {keyBindTarget: KeyBindTarget.NavigateToSettings, description: 'navigate-to-settings'},
+  {key: translate('shortcuts-modal.double-click'), description: 'bookmark'},
+];
+
 @Component({
     selector: 'app-manga-reader',
     templateUrl: './manga-reader.component.html',
@@ -124,11 +142,18 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly readingArea = viewChild.required<ElementRef>('readingArea');
   readonly canvas = viewChild<ElementRef>('content');
 
-  readonly canvasRenderer = viewChild.required(CanvasRendererComponent);
-  readonly singleRenderer = viewChild.required(SingleRendererComponent);
-  readonly doubleRenderer = viewChild.required(DoubleRendererComponent);
-  readonly doubleReverseRenderer = viewChild.required(DoubleReverseRendererComponent);
-  readonly doubleNoCoverRenderer = viewChild.required(DoubleNoCoverRendererComponent);
+  readonly canvasRenderer = viewChild(CanvasRendererComponent);
+  readonly singleRenderer = viewChild(SingleRendererComponent);
+  readonly doubleRenderer = viewChild(DoubleRendererComponent);
+  readonly doubleReverseRenderer = viewChild(DoubleReverseRendererComponent);
+  readonly doubleNoCoverRenderer = viewChild(DoubleNoCoverRendererComponent);
+
+  readonly imageElement = computed(() =>
+    this.singleRenderer()?.imageElement()
+    ?? this.doubleRenderer()?.imageElement()
+    ?? this.doubleReverseRenderer()?.imageElement()
+    ?? this.doubleNoCoverRenderer()?.imageElement()
+    ?? this.canvasRenderer()?.canvas());
 
   private readonly destroyRef = inject(DestroyRef);
   private readonly route = inject(ActivatedRoute);
@@ -137,7 +162,6 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
   private readonly formBuilder = inject(FormBuilder);
   private readonly navService = inject(NavService);
   private readonly memberService = inject(MemberService);
-  private readonly modalService = inject(ModalService);
   private readonly cdRef = inject(ChangeDetectorRef);
   private readonly toastr = inject(ToastrService);
   private readonly readingProfileService = inject(ReadingProfileService);
@@ -482,7 +506,8 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
         return this.bookmarks[this.pageNum];
       }
 
-      return chapterInfo?.chapterTitle || chapterInfo?.subtitle || '';
+      // chapterInfo.chapterTitle is already contained in title if present
+      return chapterInfo?.subtitle || '';
     });
 
     this.keyBindService.registerListener(
@@ -492,10 +517,6 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
           case KeyBindTarget.Escape:
             if (this.menuOpen) {
               this.toggleMenu();
-              return;
-            }
-            if (this.shortCutModalOpen()) {
-              this.closeShortCutModal();
               return;
             }
             this.closeReader();
@@ -532,23 +553,26 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
           case KeyBindTarget.OpenHelp:
             this.openShortcutModal();
             break;
+          case KeyBindTarget.NextChapter:
+            this.loadNextChapter();
+            break;
+          case KeyBindTarget.PreviousChapter:
+            this.loadPrevChapter();
+            break;
+          case KeyBindTarget.FirstPage:
+            this.goToPage(0);
+            break;
+          case KeyBindTarget.LastPage:
+            this.goToPage(this.maxPages);
+            break;
+          case KeyBindTarget.NavigateToSettings:
+            this.toggleMenu();
+            this.settingsOpen = !this.settingsOpen;
+            this.cdRef.markForCheck();
+            break;
         }
       },
-      [
-        KeyBindTarget.ToggleFullScreen, KeyBindTarget.BookmarkPage, KeyBindTarget.OpenHelp, KeyBindTarget.GoTo,
-        KeyBindTarget.ToggleMenu, KeyBindTarget.PageRight, KeyBindTarget.PageLeft, KeyBindTarget.Escape,
-        KeyBindTarget.PageUp, KeyBindTarget.PageDown, KeyBindTarget.OffsetDoublePage,
-      ],
-    );
-
-    this.keyBindService.registerListener(
-      this.destroyRef,
-      () => {
-        this.toggleMenu();
-        this.settingsOpen = !this.settingsOpen;
-        this.cdRef.markForCheck();
-      },
-      [KeyBindTarget.NavigateToSettings]
+      KEYBIND_TARGETS.filter(k => !!k.keyBindTarget).map(k => k.keyBindTarget as KeyBindTarget),
     );
   }
 
@@ -616,6 +640,14 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
         })
       })
     ).subscribe();
+
+    this.currentImage$.pipe(
+      filter(() => this.readerMode !== ReaderMode.Webtoon),
+      filter(img => !!img),
+      tap(() => {
+        this.imageElement()?.nativeElement?.focus();
+      }),
+    ).subscribe();
   }
 
   ngAfterViewInit() {
@@ -646,6 +678,7 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
     if (this.goToPageEvent !== undefined) this.goToPageEvent.complete();
 
     this.readerService.disableWakeLock();
+    this.readerService.exitFullscreen();
   }
 
   private handlePageUp(e: KeyBindEvent) {
@@ -717,6 +750,7 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
       emulateBook: new FormControl(this.readingProfile.emulateBook),
       swipeToPaginate: new FormControl(this.readingProfile.swipeToPaginate),
       pageOffset: new FormControl(false),
+      readingDirection: this.readingDirection,
     });
 
     this.readerModeSubject.next(this.readerMode);
@@ -798,7 +832,7 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
       if (needsSplitting) {
         // If we need to re-render, to ensure things layout properly, let's update paging direction & reset render
         this.pagingDirectionSubject.next(PAGING_DIRECTION.FORWARD);
-        this.canvasRenderer().reset();
+        this.canvasRenderer()?.reset();
         this.loadPage();
       }
     });
@@ -942,16 +976,6 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
         this.currentImage.next(img!);
         this.cdRef.markForCheck();
       }
-      // img.onerror = (evt) => {
-      //   const event = evt as Event;
-      //   const page = this.readerService.imageUrlToPageNum((event.target as HTMLImageElement).src);
-      //   console.error('Image failed to load: ', page);
-      //   (event.target as HTMLImageElement).onerror = null;
-      //   const newSrc = this.getPageUrl(pageNum, chapterId) + '#' + new Date().getTime();
-      //   console.log('requesting page ', page, ' with url: ', newSrc);
-      //   (event.target as HTMLImageElement).src = newSrc;
-      //   this.cdRef.markForCheck();
-      // }
     }
 
     return img;
@@ -1021,7 +1045,7 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
 
 
 
-  init(firstLoad: boolean) {
+  init(firstLoad: boolean, direction: 'Next' | 'Prev' | 'None' = 'None') {
     this.nextChapterId = CHAPTER_ID_NOT_FETCHED;
     this.prevChapterId = CHAPTER_ID_NOT_FETCHED;
     this.nextChapterDisabled = false;
@@ -1093,14 +1117,31 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
 
       let page = results.progress.pageNum;
 
-      // When a chapter is completed, we store the last page (maxPages - 1) as progress maxPages
-      // We need to correct for this when using it pageNum again. See setPageNum method for the correction logic
-      if (page === this.maxPages) {
-        page--;
+      // Handle an edge case where there is only 1 page, save progress instantly as progress saving is gated on pagination
+      if (direction === 'None' && page === 0 && this.maxPages === 1) {
+        if (!this.incognitoMode) {
+          this.readerService.saveProgress(this.libraryId, this.seriesId, this.volumeId, this.chapterId, 1).subscribe();
+        }
       }
 
-      if (page > this.maxPages) {
-        page = !firstLoad ? 0 : this.maxPages - 1;
+      // Reading forward into an already fully-read next chapter is a re-read: reset to the start so
+      // it re-counts on completion (via reading sessions) instead of resuming at the last page.
+      // Partially-read next chapters still resume where you left off. See readChapter()'s reread flow.
+      if (direction === 'Next' && page >= this.maxPages) {
+        if (!this.incognitoMode) {
+          this.readerService.saveProgress(this.libraryId, this.seriesId, this.volumeId, this.chapterId, 0).subscribe();
+        }
+        page = 0;
+      } else {
+        // When a chapter is completed, we store the last page (maxPages - 1) as progress maxPages
+        // We need to correct for this when using it pageNum again. See setPageNum method for the correction logic
+        if (page === this.maxPages) {
+          page--;
+        }
+
+        if (page > this.maxPages) {
+          page = !firstLoad ? 0 : this.maxPages - 1;
+        }
       }
 
       page = this.adjustPagesForDoubleRenderer(page);
@@ -1168,6 +1209,7 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   closeReader() {
+    this.readerService.closeShortCutModal();
     this.readerService.closeReader(this.libraryId, this.seriesId, this.chapterId, this.readingListMode, this.readingListId);
   }
 
@@ -1389,14 +1431,14 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
 
     this.pagingDirectionSubject.next(PAGING_DIRECTION.FORWARD);
 
-    const pageAmount = Math.max(this.canvasRenderer().getPageAmount(PAGING_DIRECTION.FORWARD), this.singleRenderer().getPageAmount(PAGING_DIRECTION.FORWARD),
-                                this.doubleRenderer().getPageAmount(PAGING_DIRECTION.FORWARD),
-                                this.doubleReverseRenderer().getPageAmount(PAGING_DIRECTION.FORWARD),
-                                this.doubleNoCoverRenderer().getPageAmount(PAGING_DIRECTION.FORWARD)
+    const pageAmount = Math.max(this.canvasRenderer()!.getPageAmount(PAGING_DIRECTION.FORWARD), this.singleRenderer()!.getPageAmount(PAGING_DIRECTION.FORWARD),
+                                this.doubleRenderer()!.getPageAmount(PAGING_DIRECTION.FORWARD),
+                                this.doubleReverseRenderer()!.getPageAmount(PAGING_DIRECTION.FORWARD),
+                                this.doubleNoCoverRenderer()!.getPageAmount(PAGING_DIRECTION.FORWARD)
                               );
     // If we are on last page with split mode, we need to be able to progress, hence why we check if we could move backwards or not
     const isSplitRendering = [PageSplitOption.SplitRightToLeft, PageSplitOption.SplitRightToLeft].includes(parseInt(this.generalSettingsForm.get('pageSplitOption')?.value, 10));
-    const notInSplit = this.canvasRenderer().getPageAmount(PAGING_DIRECTION.BACKWARDS) === 0;
+    const notInSplit = this.canvasRenderer()!.getPageAmount(PAGING_DIRECTION.BACKWARDS) === 0;
     const isASpread = this.mangaReaderService.isWidePage(this.pageNum);
 
 
@@ -1424,14 +1466,14 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
     this.pagingDirectionSubject.next(PAGING_DIRECTION.BACKWARDS);
 
 
-    const pageAmount = this.readerMode === ReaderMode.Webtoon ? 1 : Math.max(this.canvasRenderer().getPageAmount(PAGING_DIRECTION.BACKWARDS),
-                                this.singleRenderer().getPageAmount(PAGING_DIRECTION.BACKWARDS),
-                                this.doubleRenderer().getPageAmount(PAGING_DIRECTION.BACKWARDS),
-                                this.doubleNoCoverRenderer().getPageAmount(PAGING_DIRECTION.BACKWARDS),
-                                this.doubleReverseRenderer().getPageAmount(PAGING_DIRECTION.BACKWARDS)
+    const pageAmount = this.readerMode === ReaderMode.Webtoon ? 1 : Math.max(this.canvasRenderer()!.getPageAmount(PAGING_DIRECTION.BACKWARDS),
+                                this.singleRenderer()!.getPageAmount(PAGING_DIRECTION.BACKWARDS),
+                                this.doubleRenderer()!.getPageAmount(PAGING_DIRECTION.BACKWARDS),
+                                this.doubleNoCoverRenderer()!.getPageAmount(PAGING_DIRECTION.BACKWARDS),
+                                this.doubleReverseRenderer()!.getPageAmount(PAGING_DIRECTION.BACKWARDS)
                               );
 
-    const notInSplit = this.readerMode === ReaderMode.Webtoon ? true : this.canvasRenderer().shouldMovePrev();
+    const notInSplit = this.readerMode === ReaderMode.Webtoon ? true : this.canvasRenderer()!.shouldMovePrev();
 
     if ((this.pageNum - 1 < 0 && notInSplit)) {
       // Move to next volume/chapter automatically
@@ -1463,13 +1505,18 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
 
-  loadNextChapter() {
+  loadNextChapter(saveMaxProgress: boolean = false) {
     if (this.nextPageDisabled || this.nextChapterDisabled || this.bookmarkMode()) {
       this.toastr.info(translate('manga-reader.no-next-chapter'));
       this.isLoading = false;
       this.cdRef.markForCheck();
       return;
      }
+
+
+    if (saveMaxProgress && !this.incognitoMode) {
+      this.readerService.saveProgress(this.libraryId, this.seriesId, this.volumeId, this.chapterId, this.maxPages + 1).subscribe();
+    }
 
     if (this.nextChapterId === CHAPTER_ID_NOT_FETCHED || this.nextChapterId === this.chapterId) {
       this.readerService.getNextChapter(this.seriesId, this.volumeId, this.chapterId, this.readingListId).subscribe(chapterId => {
@@ -1493,7 +1540,7 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
     if (prevChapter != this.chapterId) {
       if (prevChapter !== undefined) {
         this.chapterId = prevChapter;
-        this.init(false);
+        this.init(false, 'Prev');
         return;
       }
     }
@@ -1518,7 +1565,7 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
       // Load chapter Id onto route but don't reload
       const newRoute = this.readerService.getNextChapterUrl(this.router.url, this.chapterId, this.incognitoMode, this.readingListMode, this.readingListId);
       window.history.replaceState({}, '', newRoute);
-      this.init(false);
+      this.init(false, direction);
       const msg = translate(direction === 'Next' ? 'toasts.load-next-chapter' : 'toasts.load-prev-chapter', {entity: this.entityTitleService.formatChapterName(this.libraryType).toLowerCase()});
       this.toastr.info(msg, '', {timeOut: 3000});
     } else {
@@ -1601,6 +1648,9 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
       this.readingDirection = ReadingDirection.LeftToRight;
     }
 
+    // Manually update the form to keep the reading profiel in sync
+    this.generalSettingsForm.get('readingDirection')?.setValue(this.readingDirection);
+
     if (this.menuOpen && this.readingProfile!.showScreenHints) {
       this.showClickOverlay = true;
       this.showClickOverlaySubject.next(true);
@@ -1636,7 +1686,10 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   setPageNum(pageNum: number) {
-    this.pageNum = Math.max(Math.min(pageNum, this.maxPages - 1), 0);
+    const clampedPageNum = Math.max(Math.min(pageNum, this.maxPages - 1), 0);
+    const isSamePage = clampedPageNum === this.pageNum;
+
+    this.pageNum = clampedPageNum;
     this.pageNumSubject.next({pageNum: this.pageNum, maxPages: this.maxPages});
     this.cdRef.markForCheck();
 
@@ -1654,7 +1707,7 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
         this.readerService.getChapterInfo(this.prevChapterId).subscribe(res => {
           this.continuousChapterInfos[ChapterInfoPosition.Previous] = res;
           this.prevChapterPrefetched = true;
-          this.prefetchStartOfChapter(this.nextChapterId, PAGING_DIRECTION.BACKWARDS);
+          this.prefetchStartOfChapter(this.prevChapterId, PAGING_DIRECTION.BACKWARDS);
         });
       }
     }
@@ -1667,7 +1720,11 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
 
     // We need to avoid calling this on first load (except if the chapter only has one page)
     if (!this.incognitoMode && !this.bookmarkMode() && (!this.inSetup || this.maxPages === 1)) {
-      this.readerService.saveProgress(this.libraryId, this.seriesId, this.volumeId, this.chapterId, tempPageNum).subscribe(() => {/* No operation */});
+      if (isSamePage) {
+        //console.log('Same page, dropping request: ', this.pageNum)
+        return;
+      }
+      this.readerService.saveProgress(this.libraryId, this.seriesId, this.volumeId, this.chapterId, tempPageNum).subscribe();
     }
   }
 
@@ -1751,11 +1808,7 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // This is menu only code
   toggleFullscreen() {
-      this.readerService.toggleFullscreen(this.reader().nativeElement, () => {
-        this.isFullscreen = true;
-        this.fullscreenEvent.next(true);
-        this.render();
-      });
+    this.readerService.toggleFullscreen();
   }
 
   togglePageOffset() {
@@ -1838,25 +1891,45 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
     // if canvasRenderer and doubleRenderer is undefined, then we are in webtoon mode
     const canvasRenderer = this.canvasRenderer();
     const doubleRenderer = this.doubleRenderer();
-    const isDouble = canvasRenderer !== undefined && doubleRenderer !== undefined && Math.max(canvasRenderer.getBookmarkPageCount(), this.singleRenderer().getBookmarkPageCount(),
-      doubleRenderer.getBookmarkPageCount(), this.doubleReverseRenderer().getBookmarkPageCount(), this.doubleNoCoverRenderer().getBookmarkPageCount()) > 1;
+    const isDouble = canvasRenderer !== undefined && doubleRenderer !== undefined && Math.max(canvasRenderer.getBookmarkPageCount(), this.singleRenderer()!.getBookmarkPageCount(),
+      doubleRenderer.getBookmarkPageCount(), this.doubleReverseRenderer()!.getBookmarkPageCount(), this.doubleNoCoverRenderer()!.getBookmarkPageCount()) > 1;
+
+    // Don't use forkJoin() here because order matters
 
     if (this.CurrentPageBookmarked) {
-      let apis = [this.readerService.unbookmark(this.seriesId, this.volumeId, this.chapterId, pageNum)];
-      if (isDouble) apis.push(this.readerService.unbookmark(this.seriesId, this.volumeId, this.chapterId, pageNum + 1));
-      forkJoin(apis).subscribe(() => {
-        delete this.bookmarks[pageNum];
-        if (isDouble) delete this.bookmarks[pageNum + 1];
-        this.cdRef.detectChanges();
+      const apis = [this.readerService.unbookmark(this.seriesId, this.volumeId, this.chapterId, pageNum)];
+
+      if (isDouble) {
+        apis.push(this.readerService.unbookmark(this.seriesId, this.volumeId, this.chapterId, pageNum + 1));
+      }
+
+      concat(...apis).subscribe({
+        complete: () => {
+          delete this.bookmarks[pageNum];
+
+          if (isDouble) delete this.bookmarks[pageNum + 1];
+
+          this.cdRef.detectChanges();
+        }
       });
+
     } else {
-      let apis = [this.readerService.bookmark(this.seriesId, this.volumeId, this.chapterId, pageNum)];
-      if (isDouble) apis.push(this.readerService.bookmark(this.seriesId, this.volumeId, this.chapterId, pageNum + 1));
-      forkJoin(apis).subscribe(() => {
-        this.bookmarks[pageNum] = this.chapterInfo()?.chapterTitle ?? '';
-        if (isDouble) this.bookmarks[pageNum + 1] = this.chapterInfo()?.chapterTitle ?? '';
-        this.cdRef.detectChanges();
+      const apis = [this.readerService.bookmark(this.seriesId, this.volumeId, this.chapterId, pageNum)];
+
+      if (isDouble) {
+        apis.push(this.readerService.bookmark(this.seriesId, this.volumeId, this.chapterId, pageNum + 1));
+      }
+
+      concat(...apis).subscribe({
+        complete: () => {
+          this.bookmarks[pageNum] = this.chapterInfo()?.chapterTitle ?? '';
+
+          if (isDouble) this.bookmarks[pageNum + 1] = this.chapterInfo()?.chapterTitle ?? '';
+
+          this.cdRef.detectChanges();
+        }
       });
+
     }
 
     // Show an effect on the image to show that it was bookmarked
@@ -1876,38 +1949,6 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
       this.readerService.saveProgress(this.libraryId, this.seriesId, this.volumeId, this.chapterId, this.pageNum).subscribe(() => {/* No operation */});
     }
   }
-
-  shortCutModalOpen = signal(false);
-  shortCutModalRef: TypedModalRef<ShortcutsModalComponent> | undefined;
-
-  private closeShortCutModal() {
-    if (this.shortCutModalRef) {
-      this.shortCutModalRef.dismiss();
-      this.shortCutModalRef = undefined;
-    }
-  }
-
-  // This is menu only code
-  openShortcutModal() {
-    if (this.shortCutModalOpen()) return;
-
-    this.shortCutModalOpen.set(true);
-    this.shortCutModalRef = this.modalService.open(ShortcutsModalComponent, mediumModal());
-    this.shortCutModalRef.setInput('shortcuts', [
-      {keyBindTarget: KeyBindTarget.PageLeft, description: 'prev-page'},
-      {keyBindTarget: KeyBindTarget.PageRight, description: 'next-page'},
-      {keyBindTarget: KeyBindTarget.GoTo, description: 'go-to'},
-      {keyBindTarget: KeyBindTarget.ToggleFullScreen},
-      {keyBindTarget: KeyBindTarget.ToggleMenu},
-      {keyBindTarget: KeyBindTarget.OpenHelp},
-      {keyBindTarget: KeyBindTarget.BookmarkPage, description: 'bookmark'},
-      {keyBindTarget: KeyBindTarget.OffsetDoublePage, description: 'offset-double-page'},
-      {key: translate('shortcuts-modal.double-click'), description: 'bookmark'},
-    ]);
-
-    merge(this.shortCutModalRef.closed, this.shortCutModalRef.dismissed).subscribe(() => this.shortCutModalOpen.set(false));
-  }
-
   // menu only code
   updateParentPref() {
     if (this.readingProfile.kind !== ReadingProfileKind.Implicit) {
@@ -1932,6 +1973,10 @@ export class MangaReaderComponent implements OnInit, AfterViewInit, OnDestroy {
       this.toastr.success(translate("manga-reader.reading-profile-promoted"));
       this.cdRef.markForCheck();
     });
+  }
+
+  openShortcutModal() {
+    this.readerService.openShortcutModal(KEYBIND_TARGETS);
   }
 
   translatePrefOptions(o: {text: string, value: any}) {

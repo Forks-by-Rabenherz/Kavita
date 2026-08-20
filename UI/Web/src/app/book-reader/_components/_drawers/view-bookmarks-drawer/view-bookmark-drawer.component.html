@@ -11,15 +11,15 @@
   <div class="offcanvas-body">
 
     <ul #subnav="ngbNav" ngbNav [(activeId)]="tocId" class="reader-pills nav nav-pills mb-2" [destroyOnHide]="false">
-      <li [ngbNavItem]="Tabs.BookmarkImageTab">
-        <a ngbNavLink>{{Tabs.BookmarkImageTab | tabTitle}}</a>
+      <li [ngbNavItem]="Tabs.BookmarkTextTab">
+        <a ngbNavLink>{{Tabs.BookmarkTextTab | tabTitle}}</a>
         <ng-template ngbNavContent>
           <app-personal-table-of-contents [chapterId]="chapterId()!" [pageNum]="pageNum()" (loadChapter)="loadChapterPart($event)"
                                           [tocRefresh]="refreshPToC" />
         </ng-template>
       </li>
-      <li [ngbNavItem]="Tabs.BookmarkTextTab">
-        <a ngbNavLink>{{Tabs.BookmarkTextTab | tabTitle}}</a>
+      <li [ngbNavItem]="Tabs.BookmarkImageTab">
+        <a ngbNavLink>{{Tabs.BookmarkImageTab | tabTitle}}</a>
         <ng-template ngbNavContent>
           @let items = bookmarks();
 
@@ -58,9 +58,9 @@
               </div>
             }
             @empty {
-              <div class="text-center text-muted py-4">
+              <div class="text-center py-4">
                 <i class="fa fa-bookmark-o fa-2x mb-2"></i>
-                <p class="mb-0 text-white">{{t('no-data')}}</p>
+                <p class="mb-0 drawer-text">{{t('no-data')}}</p>
               </div>
             }
           </div>

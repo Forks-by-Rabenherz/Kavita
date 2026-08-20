@@ -58,8 +58,7 @@ public class SeriesFilterTests(ITestOutputHelper outputHelper): AbstractDbTest(o
         var readerService = new ReaderService(unitOfWork, Substitute.For<ILogger<ReaderService>>(),
             Substitute.For<IEventHub>(), Substitute.For<IImageService>(),
             Substitute.For<IDirectoryService>(), Substitute.For<IScrobblingService>(),
-            Substitute.For<IReadingSessionService>(), Substitute.For<IClientInfoAccessor>(),
-            Substitute.For<ISeriesService>(), Substitute.For<IEntityNamingService>(),
+            Substitute.For<IReadingSessionService>(), Substitute.For<IClientInfoAccessor>(), Substitute.For<IEntityNamingService>(),
             Substitute.For<ILocalizationService>(), Substitute.For<IBookService>());
 
         // Select Partial and set pages read to 5 on first chapter
@@ -201,8 +200,7 @@ public class SeriesFilterTests(ITestOutputHelper outputHelper): AbstractDbTest(o
             Substitute.For<IEventHub>(), Substitute.For<IImageService>(),
             Substitute.For<IDirectoryService>(),
             Substitute.For<IScrobblingService>(),
-            Substitute.For<IReadingSessionService>(), Substitute.For<IClientInfoAccessor>(),
-            Substitute.For<ISeriesService>(), Substitute.For<IEntityNamingService>(),
+            Substitute.For<IReadingSessionService>(), Substitute.For<IClientInfoAccessor>(), Substitute.For<IEntityNamingService>(),
             Substitute.For<ILocalizationService>(), Substitute.For<IBookService>());
 
         // Set progress to 99.99% (99/100 pages read)
@@ -360,7 +358,7 @@ public class SeriesFilterTests(ITestOutputHelper outputHelper): AbstractDbTest(o
         var (unitOfWork, context, mapper) = await CreateDatabase();
         await SetupHasLanguage(context);
 
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+        await Assert.ThrowsAsync<KavitaException>(async () =>
         {
             await context.Series.HasLanguage(true, FilterComparison.GreaterThan, ["en"]).ToListAsync();
         });
@@ -509,7 +507,7 @@ public class SeriesFilterTests(ITestOutputHelper outputHelper): AbstractDbTest(o
         var (unitOfWork, context, mapper) = await CreateDatabase();
         await SetupHasAverageRating(context);
 
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+        await Assert.ThrowsAsync<KavitaException>(async () =>
         {
             await context.Series.HasAverageRating(true, (FilterComparison)999, 50).ToListAsync();
         });
@@ -517,7 +515,7 @@ public class SeriesFilterTests(ITestOutputHelper outputHelper): AbstractDbTest(o
 
     #endregion
 
-    # region HasPublicationStatus
+    #region HasPublicationStatus
 
     private async Task<AppUser> SetupHasPublicationStatus(DataContext context)
     {
@@ -636,7 +634,7 @@ public class SeriesFilterTests(ITestOutputHelper outputHelper): AbstractDbTest(o
         var (unitOfWork, context, mapper) = await CreateDatabase();
         await SetupHasPublicationStatus(context);
 
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+        await Assert.ThrowsAsync<KavitaException>(async () =>
         {
             await context.Series.HasPublicationStatus(true, (FilterComparison)999, new List<PublicationStatus> { PublicationStatus.Cancelled }).ToListAsync();
         });
@@ -809,7 +807,7 @@ public class SeriesFilterTests(ITestOutputHelper outputHelper): AbstractDbTest(o
         var (unitOfWork, context, mapper) = await CreateDatabase();
         await SetupHasAgeRating(context);
 
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+        await Assert.ThrowsAsync<KavitaException>(async () =>
         {
             await context.Series.HasAgeRating(true, (FilterComparison)999, new List<AgeRating> { AgeRating.G }).ToListAsync();
         });

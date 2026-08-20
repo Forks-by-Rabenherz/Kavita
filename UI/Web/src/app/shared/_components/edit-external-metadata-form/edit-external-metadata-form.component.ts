@@ -11,7 +11,18 @@ export const HAS_METADATA_DEFAULTS: Required<IHasMetadataIds> = {
   hardcoverId: 0,
   comicVineId: null,
   metronId: 0,
+  cbrId: 0
 };
+
+export function addMetadataIdControls(form: FormGroup, metadata: IHasMetadataIds): void {
+  form.addControl('aniListId', new FormControl(metadata.aniListId, []));
+  form.addControl('malId', new FormControl(metadata.malId, []));
+  form.addControl('hardcoverId', new FormControl(metadata.hardcoverId, []));
+  form.addControl('metronId', new FormControl(metadata.metronId, []));
+  form.addControl('comicVineId', new FormControl(metadata.comicVineId, []));
+  form.addControl('mangaBakaId', new FormControl(metadata.mangaBakaId, []));
+  form.addControl('cbrId', new FormControl(metadata.cbrId, []));
+}
 
 @Component({
   selector: 'app-edit-external-metadata-form',
@@ -39,7 +50,11 @@ export class EditExternalMetadataFormComponent implements OnInit {
 
     (Object.keys(HAS_METADATA_DEFAULTS) as (keyof IHasMetadataIds)[]).forEach((key) => {
       if (!form.contains(key)) {
-        form.addControl(key, new FormControl(entity[key] ?? null));
+        const control = new FormControl(entity[key] ?? null);
+        if (this.getIsDisabled(key)) {
+          control.disable();
+        }
+        form.addControl(key, control);
       } else {
         form.get(key)?.setValue(entity[key] ?? null);
       }
@@ -49,5 +64,10 @@ export class EditExternalMetadataFormComponent implements OnInit {
   getKeyInputType(key: string) {
     if (key === 'comicVineId') return 'text';
     return 'number';
+  }
+
+  getIsDisabled(key: string) {
+    if (key === 'cbrId') return true;
+    return false;
   }
 }

@@ -1,4 +1,6 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,6 +11,7 @@ using Kavita.Common.Extensions;
 using Kavita.Database.Extensions;
 using Kavita.Models.Constants;
 using Kavita.Models.DTOs;
+using Kavita.Models.DTOs.KavitaPlus.Scrobble;
 using Kavita.Models.DTOs.Metadata;
 using Kavita.Models.DTOs.Reader;
 using Kavita.Models.DTOs.SeriesDetail;
@@ -54,7 +57,7 @@ public class ChapterRepository(DataContext context, IMapper mapper) : IChapterRe
     /// <returns></returns>
     public async Task<IChapterInfoDto?> GetChapterInfoDtoAsync(int chapterId, CancellationToken ct = default)
     {
-        var chapterInfo = await context.Chapter
+        var data = await context.Chapter
             .Where(c => c.Id == chapterId)
             .Join(context.Volume, c => c.VolumeId, v => v.Id, (chapter, volume) => new
             {
@@ -80,25 +83,27 @@ public class ChapterRepository(DataContext context, IMapper mapper) : IChapterRe
                 series.LibraryId,
                 LibraryType = series.Library.Type
             })
-            .Select(data => new ChapterInfoDto()
-            {
-                ChapterNumber = data.ChapterNumber + string.Empty,
-                VolumeNumber = data.VolumeNumber + string.Empty,
-                VolumeId = data.VolumeId,
-                IsSpecial = data.IsSpecial,
-                SeriesId = data.SeriesId,
-                SeriesFormat = data.SeriesFormat,
-                SeriesName = data.SeriesName,
-                LibraryId = data.LibraryId,
-                Pages = data.Pages,
-                ChapterTitle = data.TitleName,
-                LibraryType = data.LibraryType
-            })
             .AsNoTracking()
             .AsSplitQuery()
             .SingleOrDefaultAsync(ct);
 
-        return chapterInfo;
+        if (data == null) return null;
+
+        return new ChapterInfoDto
+        {
+            // Use at most 5 decimal points
+            ChapterNumber = data.ChapterNumber.ToString("0.#####", CultureInfo.InvariantCulture),
+            VolumeNumber = data.VolumeNumber + string.Empty,
+            VolumeId = data.VolumeId,
+            IsSpecial = data.IsSpecial,
+            SeriesId = data.SeriesId,
+            SeriesFormat = data.SeriesFormat,
+            SeriesName = data.SeriesName,
+            LibraryId = data.LibraryId,
+            Pages = data.Pages,
+            ChapterTitle = data.TitleName,
+            LibraryType = data.LibraryType
+        };
     }
 
     public Task<int> GetChapterTotalPagesAsync(int chapterId, CancellationToken ct = default)
@@ -119,31 +124,6 @@ public class ChapterRepository(DataContext context, IMapper mapper) : IChapterRe
         return chapter;
     }
 
-    public async Task<IList<ChapterDto>> GetChapterDtoByIdsAsync(IEnumerable<int> chapterIds, int userId,
-        CancellationToken ct = default)
-    {
-        var chapters = await context.Chapter
-                .Where(c => chapterIds.Contains(c.Id))
-                .Includes(ChapterIncludes.Files | ChapterIncludes.People)
-                .ProjectToWithProgress<Chapter, ChapterDto>(mapper, userId)
-                .AsSplitQuery()
-                .ToListAsync(ct) ;
-
-        return chapters;
-    }
-
-    public async Task<ChapterMetadataDto?> GetChapterMetadataDtoAsync(int chapterId,
-        ChapterIncludes includes = ChapterIncludes.Files, CancellationToken ct = default)
-    {
-        var chapter = await context.Chapter
-            .Includes(includes)
-            .ProjectTo<ChapterMetadataDto>(mapper.ConfigurationProvider)
-            .AsNoTracking()
-            .AsSplitQuery()
-            .SingleOrDefaultAsync(c => c.Id == chapterId, ct);
-
-        return chapter;
-    }
 
     /// <summary>
     /// Returns non-tracked files for a given chapterId
@@ -191,24 +171,6 @@ public class ChapterRepository(DataContext context, IMapper mapper) : IChapterRe
             .OrderBy(c => c.SortOrder)
             .ToListAsync(ct);
     }
-
-    /// <summary>
-    /// Returns Chapters for a volume id with Progress
-    /// </summary>
-    /// <param name="volumeId"></param>
-    /// <param name="userId"></param>
-    /// <param name="ct"></param>
-    /// <returns></returns>
-    public async Task<IList<ChapterDto>> GetChapterDtosAsync(int volumeId, int userId, CancellationToken ct = default)
-    {
-        return await context.Chapter
-            .Where(c => c.VolumeId == volumeId)
-            .Includes(ChapterIncludes.Files | ChapterIncludes.People)
-            .OrderBy(c => c.SortOrder)
-            .ProjectToWithProgress<Chapter, ChapterDto>(mapper, userId)
-            .ToListAsync(ct);
-    }
-
 
     /// <summary>
     /// Returns the cover image for a chapter id.
@@ -276,9 +238,20 @@ public class ChapterRepository(DataContext context, IMapper mapper) : IChapterRe
             .SumAsync(c => c.Bytes, cancellationToken: ct);
     }
 
-    public async Task<Dictionary<int, long>> GetFilesizesAsync(IList<int> chapterIds, CancellationToken ct = default)
+    public async Task<Dictionary<int, long>> GetFilesizesAsync(int userId, IList<int> chapterIds,
+        CancellationToken ct = default)
     {
-        return await chapterIds.BatchToDictionaryAsync(50, batch =>
+        var ageRestriction = await context.AppUser.GetUserAgeRestriction(userId, ct);
+        var allowedLibraries = await context.Library.GetUserLibraries(userId).ToListAsync(ct);
+
+        var filteredChapterIds = await context.Chapter
+            .RestrictAgainstAgeRestriction(ageRestriction)
+            .Where(c => allowedLibraries.Contains(c.Volume.Series.LibraryId))
+            .Where(c => chapterIds.Contains(c.Id))
+            .Select(c => c.Id)
+            .ToListAsync(ct);
+
+        return await filteredChapterIds.BatchToDictionaryAsync(50, batch =>
             context.MangaFile
                 .Where(f => batch.Contains(f.ChapterId))
                 .ToDictionaryAsync(f => f.ChapterId, f => f.Bytes, cancellationToken: ct));
@@ -311,20 +284,16 @@ public class ChapterRepository(DataContext context, IMapper mapper) : IChapterRe
 
     public async Task<int> GetAverageUserRating(int chapterId, int userId, CancellationToken ct = default)
     {
-        // If there is a 0 or 1 rating and that rating is you, return 0 back
-        var countOfRatingsThatAreUser = await context.AppUserChapterRating
+        var ratings = await context.AppUserChapterRating
             .Where(r => r.ChapterId == chapterId && r.HasBeenRated)
-            .CountAsync(u => u.AppUserId == userId, ct);
+            .ToListAsync(ct);
 
-        if (countOfRatingsThatAreUser == 1)
+        if (ratings.Count == 0 || (ratings.Count == 1 && ratings[0].AppUserId == userId))
         {
             return 0;
         }
 
-        var avg = await context.AppUserChapterRating
-            .Where(r => r.ChapterId == chapterId && r.HasBeenRated)
-            .AverageAsync(r => (int?) r.Rating, ct);
-
+        var avg = ratings.Average(r => (int?) r.Rating);
         return avg.HasValue ? (int) (avg.Value * 20) : 0;
     }
 
@@ -438,31 +407,45 @@ public class ChapterRepository(DataContext context, IMapper mapper) : IChapterRe
             .FirstOrDefaultAsync(ct);
     }
 
-    public async Task<IList<Chapter>> GetChaptersByExternalIdsAsync(IList<string> comicVineIds, IList<long> metronIds, IList<int> libraryIds, CancellationToken ct = default)
+    public async Task<IList<Chapter>> GetChaptersByExternalIdsAsync(IList<int> kavitaIds, IList<string> comicVineIds,
+        IList<long> metronIds, IList<int> libraryIds, CancellationToken ct = default)
     {
-        if (comicVineIds.Count == 0 && metronIds.Count == 0) return [];
+        if (comicVineIds.Count == 0 && metronIds.Count == 0 && kavitaIds.Count == 0) return [];
 
-        var query = context.Chapter
+        var results = new List<Chapter>();
+        const int chunkSize = 500;
+
+        foreach (var batch in kavitaIds.Chunk(chunkSize))
+        {
+            var batchList = batch.ToList();
+            results.AddRange(await BaseQuery()
+                .Where(c => batchList.Contains(c.Id))
+                .ToListAsync(ct));
+        }
+
+        foreach (var batch in comicVineIds.Chunk(chunkSize))
+        {
+            var batchList = batch.ToList();
+            results.AddRange(await BaseQuery()
+                .Where(c => c.ComicVineId != null && batchList.Contains(c.ComicVineId))
+                .ToListAsync(ct));
+        }
+
+        foreach (var batch in metronIds.Chunk(chunkSize))
+        {
+            var batchList = batch.ToList();
+            results.AddRange(await BaseQuery()
+                .Where(c => c.MetronId > 0 && batchList.Contains(c.MetronId))
+                .ToListAsync(ct));
+        }
+
+        // Dedupe as a chapter could match on multiple providers
+        return results.DistinctBy(c => c.Id).ToList();
+
+        IQueryable<Chapter> BaseQuery() => context.Chapter
             .Include(c => c.Volume)
             .ThenInclude(v => v.Series)
             .Where(c => libraryIds.Contains(c.Volume.Series.LibraryId));
-
-        if (comicVineIds.Count > 0 && metronIds.Count > 0)
-        {
-            query = query.Where(c =>
-                (c.ComicVineId != null && comicVineIds.Contains(c.ComicVineId)) ||
-                (c.MetronId > 0 && metronIds.Contains(c.MetronId)));
-        }
-        else if (comicVineIds.Count > 0)
-        {
-            query = query.Where(c => c.ComicVineId != null && comicVineIds.Contains(c.ComicVineId));
-        }
-        else
-        {
-            query = query.Where(c => c.MetronId > 0 && metronIds.Contains(c.MetronId));
-        }
-
-        return await query.ToListAsync(ct);
     }
 
     public async Task<IList<Chapter>> GetChaptersByAlternateSeriesAsync(IList<string> normalizedNames, IList<int> libraryIds, CancellationToken ct = default)
@@ -481,5 +464,40 @@ public class ChapterRepository(DataContext context, IMapper mapper) : IChapterRe
         return chapters
             .Where(c => normalizedSet.Contains(c.AlternateSeries.ToNormalized()))
             .ToList();
+    }
+
+    public Task<List<Chapter>> GetChaptersForReadStatusTransitionRuleAsync(int userId, ReadStatusTransitionRule rule, CancellationToken ct = default)
+    {
+        if (!rule.Enabled || rule.Days <= 0) return Task.FromResult(new List<Chapter>());
+
+        var cutoffDate = DateTime.UtcNow.AddDays(-rule.Days);
+        var excludedStatuses = rule.ExcludedPublicationStatus;
+
+        var chapterProgressStats = context.AppUserProgresses
+            .Where(p => p.AppUserId == userId && p.PagesRead > 0)
+            .GroupBy(p => p.ChapterId)
+            .Select(g => new
+            {
+                ChapterId = g.Key,
+                LastProgressUtc = g.Max(p => p.LastModifiedUtc)
+            });
+
+        return context.Chapter
+            .Join(chapterProgressStats,
+                c => c.Id,
+                cp => cp.ChapterId,
+                (c, cp) => new { Chapter = c, cp.LastProgressUtc })
+            .Where(x => x.LastProgressUtc < cutoffDate)
+            .Select(x => x.Chapter)
+            .Include(c => c.Volume)
+            .ThenInclude(v => v.Series)
+            .ThenInclude(s => s.Library)
+            .Include(c => c.Volume)
+            .ThenInclude(v => v.Series)
+            .ThenInclude(s => s.ExternalSeriesMetadata)
+            .Include(c => c.Volume)
+            .ThenInclude(v => v.Series)
+            .ThenInclude(s => s.Metadata)
+            .ToListAsync(ct);
     }
 }

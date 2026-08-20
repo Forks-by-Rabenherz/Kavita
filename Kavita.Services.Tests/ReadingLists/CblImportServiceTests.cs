@@ -1,3 +1,6 @@
+using Kavita.API.Repositories;
+using Kavita.API.Services;
+using Kavita.API.Services.ReadingLists;
 using Kavita.Common.Extensions;
 using Kavita.Database.Tests;
 using Kavita.Models.Builders;
@@ -5,9 +8,12 @@ using Kavita.Models.DTOs.ReadingLists.CBL;
 using Kavita.Models.DTOs.ReadingLists.CBL.Import;
 using Kavita.Models.DTOs.ReadingLists.CBL.Internal;
 using Kavita.Models.Entities.Enums;
+using Kavita.Models.Entities.Enums.ReadingList;
 using Kavita.Models.Entities.ReadingLists;
 using Kavita.Services.Builders;
 using Kavita.Services.Tests.Helpers;
+using Microsoft.Extensions.Logging;
+using NSubstitute;
 using Xunit.Abstractions;
 
 namespace Kavita.Services.Tests.ReadingLists;
@@ -33,7 +39,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Success, summary.Success);
         Assert.Equal(3, summary.SuccessfulInserts.Count);
@@ -56,7 +62,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Partial, summary.Success);
         Assert.Equal(2, summary.SuccessfulInserts.Count);
@@ -77,7 +83,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Fail, summary.Success);
         Assert.Contains(summary.Results, r => r.Reason == CblImportReason.SeriesMissing);
@@ -94,7 +100,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Fail, summary.Success);
         Assert.Contains(summary.Results, r => r.Reason == CblImportReason.EmptyFile);
@@ -119,7 +125,7 @@ public class CblImportServiceTests : AbstractDbTest
             ItemResolutions = new Dictionary<int, CblItemDecision>(),
             SaveAsRemapRules = false
         };
-        var summary = await svc.UpsertReadingList(seed.User.Id, filePath, new CblImportOptions(), decisions);
+        var summary = await svc.UpsertReadingList(seed.User.Id, filePath, decisions);
 
         Assert.False(summary.IsUpdate);
 
@@ -155,7 +161,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.True(summary.IsUpdate);
     }
@@ -173,7 +179,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.False(summary.IsUpdate);
     }
@@ -209,13 +215,100 @@ public class CblImportServiceTests : AbstractDbTest
             ItemResolutions = new Dictionary<int, CblItemDecision>(),
             SaveAsRemapRules = false
         };
-        var summary = await svc.UpsertReadingList(seed.User.Id, filePath, new CblImportOptions(), decisions);
+        var summary = await svc.UpsertReadingList(seed.User.Id, filePath, decisions);
 
         Assert.True(summary.IsUpdate);
 
         var updated = await unitOfWork.ReadingListRepository.GetReadingListByTitleAsync("Update Test", seed.User.Id);
         Assert.NotNull(updated);
         Assert.Equal(3, updated!.Items.Count);
+    }
+
+    [Fact]
+    public async Task UpsertReadingList_RemovesItemsNoLongerInCbl()
+    {
+        var (unitOfWork, context, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("simple-comic.json");
+
+        var ids1 = seed.Lookup[("Fables", "1", "1")];
+        var ids2 = seed.Lookup[("Fables", "1", "2")];
+        var ids3 = seed.Lookup[("Fables", "1", "3")];
+
+        // Pre-create reading list with Fables #1, #2, #3
+        var rl = new ReadingListBuilder("Removal Test")
+            .WithAppUserId(seed.User.Id)
+            .WithItem(new ReadingListItemBuilder(0, ids1.SeriesId, ids1.VolumeId, ids1.ChapterId).Build())
+            .WithItem(new ReadingListItemBuilder(1, ids2.SeriesId, ids2.VolumeId, ids2.ChapterId).Build())
+            .WithItem(new ReadingListItemBuilder(2, ids3.SeriesId, ids3.VolumeId, ids3.ChapterId).Build())
+            .Build();
+        unitOfWork.ReadingListRepository.Add(rl);
+        await unitOfWork.CommitAsync();
+
+        // Re-import the same list with #2 dropped
+        var cbl = CblFileBuilder.Create("Removal Test")
+            .AddBook("Fables", volume: "1", number: "1")
+            .AddBook("Fables", volume: "1", number: "3")
+            .Build();
+
+        var filePath = helper.WriteCblToDisk(cbl);
+        var svc = helper.CreateImportService();
+        var decisions = new CblImportDecisions
+        {
+            ItemResolutions = new Dictionary<int, CblItemDecision>(),
+            SaveAsRemapRules = false
+        };
+        var summary = await svc.UpsertReadingList(seed.User.Id, filePath, decisions);
+
+        Assert.True(summary.IsUpdate);
+
+        var updated = await unitOfWork.ReadingListRepository.GetReadingListByTitleAsync("Removal Test", seed.User.Id);
+        Assert.NotNull(updated);
+        Assert.Equal(2, updated!.Items.Count);
+
+        // #2 is gone, and the survivors are re-ordered contiguously
+        Assert.DoesNotContain(updated.Items, i => i.ChapterId == ids2.ChapterId);
+        var items = updated.Items.OrderBy(i => i.Order).ToList();
+        Assert.Equal(ids1.ChapterId, items[0].ChapterId);
+        Assert.Equal(0, items[0].Order);
+        Assert.Equal(ids3.ChapterId, items[1].ChapterId);
+        Assert.Equal(1, items[1].Order);
+    }
+
+    [Fact]
+    public async Task UpsertReadingList_NothingMatches_KeepsExistingItems()
+    {
+        var (unitOfWork, context, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("simple-comic.json");
+
+        var ids = seed.Lookup[("Fables", "1", "1")];
+
+        var rl = new ReadingListBuilder("Failed Import Test")
+            .WithAppUserId(seed.User.Id)
+            .WithItem(new ReadingListItemBuilder(0, ids.SeriesId, ids.VolumeId, ids.ChapterId).Build())
+            .Build();
+        unitOfWork.ReadingListRepository.Add(rl);
+        await unitOfWork.CommitAsync();
+
+        // Nothing in this CBL resolves, so the existing list must be left intact
+        var cbl = CblFileBuilder.Create("Failed Import Test")
+            .AddBook("Some Series Not In The Library", volume: "1", number: "1")
+            .Build();
+
+        var filePath = helper.WriteCblToDisk(cbl);
+        var svc = helper.CreateImportService();
+        var decisions = new CblImportDecisions
+        {
+            ItemResolutions = new Dictionary<int, CblItemDecision>(),
+            SaveAsRemapRules = false
+        };
+        await svc.UpsertReadingList(seed.User.Id, filePath, decisions);
+
+        var updated = await unitOfWork.ReadingListRepository.GetReadingListByTitleAsync("Failed Import Test", seed.User.Id);
+        Assert.NotNull(updated);
+        Assert.Single(updated!.Items);
+        Assert.Equal(ids.ChapterId, updated.Items.First().ChapterId);
     }
 
     #endregion
@@ -249,7 +342,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Success, summary.Success);
         Assert.Single(summary.SuccessfulInserts);
@@ -286,7 +379,7 @@ public class CblImportServiceTests : AbstractDbTest
         // User1 should match via remap
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary1 = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary1 = await svc.ValidateList(seed.User.Id, filePath);
         Assert.Equal(CblImportResult.Success, summary1.Success);
 
         // User2 should NOT match (no remap, and "Fable" doesn't match "Fables" exactly)
@@ -294,7 +387,7 @@ public class CblImportServiceTests : AbstractDbTest
             .AddBook("Fable", volume: "1", number: "1")
             .Build();
         var filePath2 = helper.WriteCblToDisk(cbl2);
-        var summary2 = await svc.ValidateList(user2.Id, filePath2, new CblImportOptions());
+        var summary2 = await svc.ValidateList(user2.Id, filePath2);
         Assert.Contains(summary2.Results, r => r.Reason == CblImportReason.SeriesMissing);
     }
 
@@ -326,28 +419,18 @@ public class CblImportServiceTests : AbstractDbTest
             },
             SaveAsRemapRules = true
         };
-        await svc.UpsertReadingList(seed.User.Id, filePath, new CblImportOptions(), decisions);
+        await svc.UpsertReadingList(seed.User.Id, filePath, decisions);
 
         // Verify remap rule was persisted
-        var rules = await unitOfWork.RemapRuleRepository.GetRulesForUserAsync(seed.User.Id);
+        var rules = await unitOfWork.RemapRuleRepository.GetRuleDtosForUserAsync(seed.User.Id);
         Assert.NotEmpty(rules);
         Assert.Contains(rules, r =>
             r.NormalizedCblSeriesName == "Fables".ToNormalized() &&
             r.SeriesId == fablesIds.SeriesId);
     }
 
-    /// <summary>
-    /// A series-only remap (CblVolume=null) must not cause false positives when the CBL
-    /// contains multiple entries that share the same series name but differ by volume.
-    /// In Comic libraries the volume year is appended to the series name, so
-    /// "Batman" Vol 2014 -> "Batman (2014)" and "Batman" Vol 1994 -> "Batman (1994)".
-    /// A remap rule mapping "Batman" -> "Batman (2014)" should only succeed when
-    /// the volume actually resolves within "Batman (2014)". When the CBL entry has
-    /// Volume="1994", the remap should fall through and let Tier 3 (ComicVine naming)
-    /// resolve it to "Batman (1994)" instead.
-    /// </summary>
     [Fact]
-    public async Task ValidateList_SeriesRemap_FallsThroughWhenVolumeDoesNotResolve()
+    public async Task ValidateList_SeriesVolumeRemap()
     {
         var (unitOfWork, context, _) = await CreateDatabase();
         using var helper = new CblTestHelper(unitOfWork);
@@ -361,6 +444,7 @@ public class CblImportServiceTests : AbstractDbTest
         {
             NormalizedCblSeriesName = "Batman".ToNormalized(),
             CblSeriesName = "Batman",
+            CblVolume = "2014",
             SeriesId = batman2014Ids.SeriesId,
             SeriesNameAtMapping = "Batman (2014)",
             AppUserId = seed.User.Id,
@@ -375,7 +459,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Success, summary.Success);
         Assert.Equal(2, summary.SuccessfulInserts.Count);
@@ -426,7 +510,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Success, summary.Success);
         Assert.Single(summary.SuccessfulInserts);
@@ -466,7 +550,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Success, summary.Success);
         Assert.Single(summary.SuccessfulInserts);
@@ -517,7 +601,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Success, summary.Success);
         Assert.Single(summary.SuccessfulInserts);
@@ -547,7 +631,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(teenUser.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(teenUser.Id, filePath);
 
         Assert.Equal(CblImportResult.Partial, summary.Success);
         // Batman (Teen) should succeed, Fables (Mature) should be missing
@@ -570,7 +654,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Success, summary.Success);
         Assert.Equal(2, summary.SuccessfulInserts.Count);
@@ -614,7 +698,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(teenUser.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(teenUser.Id, filePath);
 
         Assert.Contains(summary.Results, r => r.Reason == CblImportReason.SeriesMissing);
     }
@@ -657,7 +741,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(teenUser.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(teenUser.Id, filePath);
 
         Assert.Equal(CblImportResult.Success, summary.Success);
         Assert.Single(summary.SuccessfulInserts);
@@ -682,7 +766,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Success, summary.Success);
         Assert.Single(summary.SuccessfulInserts);
@@ -704,7 +788,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Success, summary.Success);
         Assert.Single(summary.SuccessfulInserts);
@@ -726,7 +810,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Success, summary.Success);
         Assert.Single(summary.SuccessfulInserts);
@@ -749,12 +833,37 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Success, summary.Success);
         Assert.Single(summary.SuccessfulInserts);
         // Should fall through to name matching, not ExternalId
         Assert.NotEqual(CblMatchTier.ExternalId, summary.SuccessfulInserts.First().MatchTier);
+    }
+
+    [Fact]
+    public async Task ValidateList_ExternalId_Kavita_DirectMatch()
+    {
+        var (unitOfWork, _, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("rated-library.json");
+
+        // Fables vol 1 chapter 1 — get its DB-assigned chapter ID
+        var chapterId = seed.Lookup[("Fables", "1", "1")].ChapterId;
+
+        // Wrong series name forces external ID path — Kavita provider with the chapter's own ID
+        var cbl = CblFileBuilder.Create("Kavita ID Match Test")
+            .AddBook("WrongSeriesName", volume: "1", number: "1",
+                externalIds: [new CblExternalId { Provider = CblExternalDbProvider.Kavita, IssueId = chapterId.ToString() }])
+            .Build();
+
+        var filePath = helper.WriteCblToDisk(cbl);
+        var svc = helper.CreateImportService();
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
+
+        Assert.Equal(CblImportResult.Success, summary.Success);
+        Assert.Single(summary.SuccessfulInserts);
+        Assert.Equal(CblMatchTier.ExternalId, summary.SuccessfulInserts.First().MatchTier);
     }
 
     #endregion
@@ -788,7 +897,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(user2.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(user2.Id, filePath);
 
         Assert.Equal(CblImportResult.Fail, summary.Success);
     }
@@ -834,62 +943,11 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(user.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(user.Id, filePath);
 
         Assert.Equal(CblImportResult.Partial, summary.Success);
         Assert.Single(summary.SuccessfulInserts);
         Assert.Equal("SeriesA", summary.SuccessfulInserts.First().Series);
-    }
-
-    [Fact]
-    public async Task ValidateList_ApplicableLibraries_RestrictsSearch()
-    {
-        var (unitOfWork, context, _) = await CreateDatabase();
-        using var helper = new CblTestHelper(unitOfWork);
-
-        // Seed two libraries
-        var libA = new LibraryBuilder("LibA", LibraryType.Comic)
-            .WithFolderPath(new FolderPathBuilder("/data/liba").Build())
-            .Build();
-        libA.Series = [new SeriesBuilder("SeriesA")
-            .WithVolume(new VolumeBuilder("1")
-                .WithChapter(new ChapterBuilder("1").Build())
-                .Build())
-            .Build()];
-
-        var libB = new LibraryBuilder("LibB", LibraryType.Comic)
-            .WithFolderPath(new FolderPathBuilder("/data/libb").Build())
-            .Build();
-        libB.Series = [new SeriesBuilder("SeriesB")
-            .WithVolume(new VolumeBuilder("1")
-                .WithChapter(new ChapterBuilder("1").Build())
-                .Build())
-            .Build()];
-
-        // User has access to both
-        var user = new AppUserBuilder("bothuser", "both@test.com")
-            .WithLibrary(libA)
-            .WithLibrary(libB)
-            .Build();
-        context.AppUser.Add(user);
-        await context.SaveChangesAsync();
-        context.ChangeTracker.Clear();
-
-        var cbl = CblFileBuilder.Create("Applicable Libs Test")
-            .AddBook("SeriesA", volume: "1", number: "1")
-            .AddBook("SeriesB", volume: "1", number: "1")
-            .Build();
-
-        var filePath = helper.WriteCblToDisk(cbl);
-        var svc = helper.CreateImportService();
-
-        // Only search in LibB
-        var options = new CblImportOptions { ApplicableLibraries = [libB.Id] };
-        var summary = await svc.ValidateList(user.Id, filePath, options);
-
-        Assert.Equal(CblImportResult.Partial, summary.Success);
-        Assert.Single(summary.SuccessfulInserts);
-        Assert.Equal("SeriesB", summary.SuccessfulInserts.First().Series);
     }
 
     #endregion
@@ -932,7 +990,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(user.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(user.Id, filePath);
 
         Assert.Equal(CblImportResult.Success, summary.Success);
         Assert.Single(summary.SuccessfulInserts);
@@ -971,7 +1029,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Success, summary.Success);
         Assert.Single(summary.SuccessfulInserts);
@@ -1009,7 +1067,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Success, summary.Success);
         Assert.Single(summary.SuccessfulInserts);
@@ -1046,7 +1104,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Success, summary.Success);
         Assert.Single(summary.SuccessfulInserts);
@@ -1099,7 +1157,7 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Success, summary.Success);
         Assert.Single(summary.SuccessfulInserts);
@@ -1148,13 +1206,821 @@ public class CblImportServiceTests : AbstractDbTest
 
         var filePath = helper.WriteCblToDisk(cbl);
         var svc = helper.CreateImportService();
-        var summary = await svc.ValidateList(seed.User.Id, filePath, new CblImportOptions());
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
 
         Assert.Equal(CblImportResult.Success, summary.Success);
         Assert.Single(summary.SuccessfulInserts);
         Assert.Equal(CblMatchTier.RemapRule, summary.SuccessfulInserts.First().MatchTier);
         // Volume-only should win over series-only
         Assert.Equal(batman2014Ids.SeriesId, summary.SuccessfulInserts.First().SeriesId);
+    }
+
+    #endregion
+
+    #region Group 10: Series Remap — Volume Fallback to Loose-Leaf
+
+    /// <summary>
+    /// When a series-level remap targets a manga series with only loose-leaf issues,
+    /// the CBL volume (e.g. "2005") doesn't exist in the target series. The matcher
+    /// should fall back to loose-leaf volume and resolve the chapter there.
+    /// </summary>
+    [Fact]
+    public async Task ValidateList_SeriesRemap_FallsBackToLooseLeafWhenVolumeMissing()
+    {
+        var (unitOfWork, context, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("manga-loose-leaf.json");
+
+        var adventureTimeIds = seed.Lookup[("Adventure Time", "-100000", "1")];
+
+        // Series-level remap: "Zombie Tales" -> Adventure Time (manga, loose-leaf only)
+        unitOfWork.RemapRuleRepository.Add(new ReadingListRemapRule
+        {
+            NormalizedCblSeriesName = "Zombie Tales".ToNormalized(),
+            CblSeriesName = "Zombie Tales",
+            SeriesId = adventureTimeIds.SeriesId,
+            SeriesNameAtMapping = "Adventure Time",
+            AppUserId = seed.User.Id,
+            CreatedUtc = DateTime.UtcNow
+        });
+        await unitOfWork.CommitAsync();
+
+        // CBL has Volume="2005" which doesn't exist in Adventure Time
+        var cbl = CblFileBuilder.Create("Loose Leaf Fallback Test")
+            .AddBook("Zombie Tales", volume: "2005", number: "1")
+            .Build();
+
+        var filePath = helper.WriteCblToDisk(cbl);
+        var svc = helper.CreateImportService();
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
+
+        Assert.Equal(CblImportResult.Success, summary.Success);
+        Assert.Single(summary.SuccessfulInserts);
+        Assert.Equal(CblMatchTier.RemapRule, summary.SuccessfulInserts.First().MatchTier);
+        Assert.Equal(adventureTimeIds.SeriesId, summary.SuccessfulInserts.First().SeriesId);
+    }
+
+    /// <summary>
+    /// Even with the loose-leaf fallback, if the chapter doesn't exist in the
+    /// loose-leaf volume either, the result should still report failure.
+    /// </summary>
+    [Fact]
+    public async Task ValidateList_SeriesRemap_LooseLeafFallback_ChapterMissing()
+    {
+        var (unitOfWork, context, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("manga-loose-leaf.json");
+
+        var adventureTimeIds = seed.Lookup[("Adventure Time", "-100000", "1")];
+
+        unitOfWork.RemapRuleRepository.Add(new ReadingListRemapRule
+        {
+            NormalizedCblSeriesName = "Zombie Tales".ToNormalized(),
+            CblSeriesName = "Zombie Tales",
+            SeriesId = adventureTimeIds.SeriesId,
+            SeriesNameAtMapping = "Adventure Time",
+            AppUserId = seed.User.Id,
+            CreatedUtc = DateTime.UtcNow
+        });
+        await unitOfWork.CommitAsync();
+
+        // Verify the rule was actually persisted
+        var rules = await unitOfWork.RemapRuleRepository.GetRuleDtosForUserAsync(seed.User.Id);
+        Assert.NotEmpty(rules);
+
+        // Chapter 99 doesn't exist anywhere in Adventure Time
+        var cbl = CblFileBuilder.Create("Missing Chapter Test")
+            .AddBook("Zombie Tales", volume: "2005", number: "99")
+            .Build();
+
+        var filePath = helper.WriteCblToDisk(cbl);
+        var svc = helper.CreateImportService();
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
+
+        Assert.Equal(CblImportResult.Fail, summary.Success);
+        Assert.Contains(summary.Results, r => r.Reason == CblImportReason.ChapterMissing);
+    }
+
+    /// <summary>
+    /// When the series-level remap targets a Comic series where the volume DOES exist,
+    /// the fallback should NOT activate — the volume should resolve directly.
+    /// </summary>
+    [Fact]
+    public async Task ValidateList_SeriesRemap_VolumeExistsInTarget_NoFallback()
+    {
+        var (unitOfWork, context, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("comic-multi-volume-series.json");
+
+        var batman2014Ids = seed.Lookup[("Batman (2014)", "2014", "1")];
+
+        // Series-level remap: "Dark Knight" -> Batman (2014)
+        unitOfWork.RemapRuleRepository.Add(new ReadingListRemapRule
+        {
+            NormalizedCblSeriesName = "Dark Knight".ToNormalized(),
+            CblSeriesName = "Dark Knight",
+            SeriesId = batman2014Ids.SeriesId,
+            SeriesNameAtMapping = "Batman (2014)",
+            AppUserId = seed.User.Id,
+            CreatedUtc = DateTime.UtcNow
+        });
+        await unitOfWork.CommitAsync();
+
+        // Volume 2014 exists in Batman (2014) — should resolve directly, no fallback needed
+        var cbl = CblFileBuilder.Create("Direct Volume Match Test")
+            .AddBook("Dark Knight", volume: "2014", number: "1")
+            .Build();
+
+        var filePath = helper.WriteCblToDisk(cbl);
+        var svc = helper.CreateImportService();
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
+
+        Assert.Equal(CblImportResult.Success, summary.Success);
+        Assert.Single(summary.SuccessfulInserts);
+        Assert.Equal(CblMatchTier.RemapRule, summary.SuccessfulInserts.First().MatchTier);
+        Assert.Equal(batman2014Ids.SeriesId, summary.SuccessfulInserts.First().SeriesId);
+        Assert.Equal(batman2014Ids.ChapterId, summary.SuccessfulInserts.First().ChapterId);
+    }
+
+    /// <summary>
+    /// Series-level remap with multiple CBL entries: some volumes exist in the target,
+    /// some fall back to loose-leaf.
+    /// </summary>
+    [Fact]
+    public async Task ValidateList_SeriesRemap_MultipleEntries_MixedResolution()
+    {
+        var (unitOfWork, context, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("manga-loose-leaf.json");
+
+        var ch1Ids = seed.Lookup[("Adventure Time", "-100000", "1")];
+        var ch3Ids = seed.Lookup[("Adventure Time", "-100000", "3")];
+
+        unitOfWork.RemapRuleRepository.Add(new ReadingListRemapRule
+        {
+            NormalizedCblSeriesName = "Zombie Tales".ToNormalized(),
+            CblSeriesName = "Zombie Tales",
+            SeriesId = ch1Ids.SeriesId,
+            SeriesNameAtMapping = "Adventure Time",
+            AppUserId = seed.User.Id,
+            CreatedUtc = DateTime.UtcNow
+        });
+        await unitOfWork.CommitAsync();
+
+        var cbl = CblFileBuilder.Create("Mixed Resolution Test")
+            .AddBook("Zombie Tales", volume: "2005", number: "1")
+            .AddBook("Zombie Tales", volume: "2005", number: "3")
+            .Build();
+
+        var filePath = helper.WriteCblToDisk(cbl);
+        var svc = helper.CreateImportService();
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
+
+        Assert.Equal(CblImportResult.Success, summary.Success);
+        Assert.Equal(2, summary.SuccessfulInserts.Count);
+        Assert.All(summary.SuccessfulInserts, r => Assert.Equal(CblMatchTier.RemapRule, r.MatchTier));
+    }
+
+    #endregion
+
+    #region Group 11: Name Matching Tiers
+
+    /// <summary>
+    /// Tier 3: Comic naming pattern — "Batman" with Volume="2014" should match series "Batman (2014)"
+    /// </summary>
+    [Fact]
+    public async Task ValidateList_ComicNamingPattern_MatchesTier3()
+    {
+        var (unitOfWork, _, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("comic-multi-volume-series.json");
+
+        var batman2014Ids = seed.Lookup[("Batman (2014)", "2014", "1")];
+
+        var cbl = CblFileBuilder.Create("Comic Naming Test")
+            .AddBook("Batman", volume: "2014", number: "1")
+            .Build();
+
+        var filePath = helper.WriteCblToDisk(cbl);
+        var svc = helper.CreateImportService();
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
+
+        Assert.Equal(CblImportResult.Success, summary.Success);
+        Assert.Single(summary.SuccessfulInserts);
+        Assert.Equal(CblMatchTier.ComicVineNaming, summary.SuccessfulInserts.First().MatchTier);
+        Assert.Equal(batman2014Ids.SeriesId, summary.SuccessfulInserts.First().SeriesId);
+    }
+
+    /// <summary>
+    /// Tier 4: Article-stripped — "The Fables" should match series "Fables" with articles removed
+    /// </summary>
+    [Fact]
+    public async Task ValidateList_ArticleStripped_MatchesTier4()
+    {
+        var (unitOfWork, _, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("simple-comic.json");
+
+        var cbl = CblFileBuilder.Create("Article Stripped Test")
+            .AddBook("The Fables", volume: "1", number: "1")
+            .Build();
+
+        var filePath = helper.WriteCblToDisk(cbl);
+        var svc = helper.CreateImportService();
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
+
+        Assert.Equal(CblImportResult.Success, summary.Success);
+        Assert.Single(summary.SuccessfulInserts);
+        Assert.Equal(CblMatchTier.ArticleStripped, summary.SuccessfulInserts.First().MatchTier);
+    }
+
+    /// <summary>
+    /// Tier 5: Reprint-stripped — "Fables Deluxe Edition" should match "Fables" with suffix removed
+    /// </summary>
+    [Fact]
+    public async Task ValidateList_ReprintStripped_MatchesTier5()
+    {
+        var (unitOfWork, _, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("simple-comic.json");
+
+        var cbl = CblFileBuilder.Create("Reprint Stripped Test")
+            .AddBook("Fables Deluxe Edition", volume: "1", number: "1")
+            .Build();
+
+        var filePath = helper.WriteCblToDisk(cbl);
+        var svc = helper.CreateImportService();
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
+
+        Assert.Equal(CblImportResult.Success, summary.Success);
+        Assert.Single(summary.SuccessfulInserts);
+        Assert.Equal(CblMatchTier.ReprintStripped, summary.SuccessfulInserts.First().MatchTier);
+    }
+
+    #endregion
+
+    #region Group 12: Global Remap Rules
+
+    [Fact]
+    public async Task ValidateList_GlobalRemap_AppliesForAnyUser()
+    {
+        var (unitOfWork, context, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("simple-comic.json", "user1");
+
+        var user2 = await helper.AddUser("user2", seed.Library);
+
+        var fablesIds = seed.Lookup[("Fables", "1", "1")];
+
+        // Add global remap rule (created by user1, visible to all)
+        unitOfWork.RemapRuleRepository.Add(new ReadingListRemapRule
+        {
+            NormalizedCblSeriesName = "Fable".ToNormalized(),
+            CblSeriesName = "Fable",
+            SeriesId = fablesIds.SeriesId,
+            SeriesNameAtMapping = "Fables",
+            AppUserId = seed.User.Id,
+            IsGlobal = true,
+            CreatedUtc = DateTime.UtcNow
+        });
+        await unitOfWork.CommitAsync();
+
+        var cbl = CblFileBuilder.Create("Global Remap Test")
+            .AddBook("Fable", volume: "1", number: "1")
+            .Build();
+
+        var filePath = helper.WriteCblToDisk(cbl);
+        var svc = helper.CreateImportService();
+
+        // Both users should match via global remap
+        var summary1 = await svc.ValidateList(seed.User.Id, filePath);
+        Assert.Equal(CblImportResult.Success, summary1.Success);
+        Assert.Equal(CblMatchTier.RemapRule, summary1.SuccessfulInserts.First().MatchTier);
+
+        var cbl2 = CblFileBuilder.Create("Global Remap Test 2")
+            .AddBook("Fable", volume: "1", number: "1")
+            .Build();
+        var filePath2 = helper.WriteCblToDisk(cbl2);
+        var summary2 = await svc.ValidateList(user2.Id, filePath2);
+        Assert.Equal(CblImportResult.Success, summary2.Success);
+        Assert.Equal(CblMatchTier.RemapRule, summary2.SuccessfulInserts.First().MatchTier);
+    }
+
+    [Fact]
+    public async Task ValidateList_UserRemap_TakesPrecedenceOverGlobal()
+    {
+        var (unitOfWork, context, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("simple-comic.json", "user1");
+
+        var user2 = await helper.AddUser("user2", seed.Library);
+
+        var fablesIds = seed.Lookup[("Fables", "1", "1")];
+        var batmanIds = seed.Lookup[("Batman", "2016", "1")];
+
+        // Global remap created by user2: "Fable" -> Batman
+        unitOfWork.RemapRuleRepository.Add(new ReadingListRemapRule
+        {
+            NormalizedCblSeriesName = "Fable".ToNormalized(),
+            CblSeriesName = "Fable",
+            SeriesId = batmanIds.SeriesId,
+            SeriesNameAtMapping = "Batman",
+            AppUserId = user2.Id,
+            IsGlobal = true,
+            CreatedUtc = DateTime.UtcNow
+        });
+
+        // User-specific remap for user1: "Fable" -> Fables (should win)
+        unitOfWork.RemapRuleRepository.Add(new ReadingListRemapRule
+        {
+            NormalizedCblSeriesName = "Fable".ToNormalized(),
+            CblSeriesName = "Fable",
+            SeriesId = fablesIds.SeriesId,
+            SeriesNameAtMapping = "Fables",
+            AppUserId = seed.User.Id,
+            CreatedUtc = DateTime.UtcNow
+        });
+        await unitOfWork.CommitAsync();
+
+        var cbl = CblFileBuilder.Create("User vs Global Precedence")
+            .AddBook("Fable", volume: "1", number: "1")
+            .Build();
+
+        var filePath = helper.WriteCblToDisk(cbl);
+        var svc = helper.CreateImportService();
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
+
+        Assert.Equal(CblImportResult.Success, summary.Success);
+        Assert.Single(summary.SuccessfulInserts);
+        // User-specific rule should win — matched to Fables, not Batman
+        Assert.Equal(fablesIds.SeriesId, summary.SuccessfulInserts.First().SeriesId);
+    }
+
+    #endregion
+
+    #region Group 13: Series Disambiguation
+
+    /// <summary>
+    /// When two series share the same name, the CBL Year field should disambiguate.
+    /// </summary>
+    [Fact]
+    public async Task ValidateList_SeriesDisambiguation_ByYear()
+    {
+        var (unitOfWork, context, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+
+        var library = new LibraryBuilder("Comics", LibraryType.Comic)
+            .WithFolderPath(new FolderPathBuilder("/data/comics").Build())
+            .Build();
+
+        var series2000 = new SeriesBuilder("Fables")
+            .WithMetadata(new SeriesMetadataBuilder().WithReleaseYear(2000).Build())
+            .WithVolume(new VolumeBuilder("1")
+                .WithChapter(new ChapterBuilder("1").Build())
+                .Build())
+            .Build();
+
+        var series2020 = new SeriesBuilder("Fables")
+            .WithMetadata(new SeriesMetadataBuilder().WithReleaseYear(2020).Build())
+            .WithVolume(new VolumeBuilder("1")
+                .WithChapter(new ChapterBuilder("1").Build())
+                .Build())
+            .Build();
+
+        library.Series = [series2000, series2020];
+
+        var user = new AppUserBuilder("disambiguser", "disambig@test.com")
+            .WithLibrary(library)
+            .Build();
+        context.AppUser.Add(user);
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        // CBL entry with Year="2020" should match the 2020 series
+        var cbl = CblFileBuilder.Create("Disambiguation Test")
+            .AddBook("Fables", volume: "1", number: "1", year: "2020")
+            .Build();
+
+        var filePath = helper.WriteCblToDisk(cbl);
+        var svc = helper.CreateImportService();
+        var summary = await svc.ValidateList(user.Id, filePath);
+
+        Assert.Equal(CblImportResult.Success, summary.Success);
+        Assert.Single(summary.SuccessfulInserts);
+        Assert.Equal(series2020.Id, summary.SuccessfulInserts.First().SeriesId);
+    }
+
+    #endregion
+
+    #region Group 14: Issue-Only Remap Rules
+
+    /// <summary>
+    /// An issue-only remap (CblNumber set, CblVolume empty) should match any CBL entry
+    /// with that issue number regardless of volume.
+    /// </summary>
+    [Fact]
+    public async Task ValidateList_IssueOnlyRemap_MatchesRegardlessOfVolume()
+    {
+        var (unitOfWork, context, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("simple-comic.json");
+
+        var ch2Ids = seed.Lookup[("Fables", "1", "2")];
+
+        // Issue-only remap: Fables #2 (any volume)
+        unitOfWork.RemapRuleRepository.Add(new ReadingListRemapRule
+        {
+            NormalizedCblSeriesName = "Fables".ToNormalized(),
+            CblSeriesName = "Fables",
+            CblNumber = "2",
+            SeriesId = ch2Ids.SeriesId,
+            VolumeId = ch2Ids.VolumeId,
+            ChapterId = ch2Ids.ChapterId,
+            SeriesNameAtMapping = "Fables",
+            AppUserId = seed.User.Id,
+            CreatedUtc = DateTime.UtcNow
+        });
+        await unitOfWork.CommitAsync();
+
+        // CBL with volume="5" (doesn't exist) but issue #2 should still match via issue-only remap
+        var cbl = CblFileBuilder.Create("Issue Only Remap Test")
+            .AddBook("Fables", volume: "5", number: "2")
+            .Build();
+
+        var filePath = helper.WriteCblToDisk(cbl);
+        var svc = helper.CreateImportService();
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
+
+        Assert.Equal(CblImportResult.Success, summary.Success);
+        Assert.Single(summary.SuccessfulInserts);
+        Assert.Equal(CblMatchTier.RemapRule, summary.SuccessfulInserts.First().MatchTier);
+        Assert.Equal(ch2Ids.ChapterId, summary.SuccessfulInserts.First().ChapterId);
+    }
+
+    #endregion
+
+    #region Group 15: Chapter Resolution Edge Cases
+
+    /// <summary>
+    /// When no chapter number is specified in the CBL entry, should default to first chapter in volume.
+    /// </summary>
+    [Fact]
+    public async Task ValidateList_NoChapterNumber_DefaultsToFirstChapter()
+    {
+        var (unitOfWork, _, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("simple-comic.json");
+
+        var ch1Ids = seed.Lookup[("Fables", "1", "1")];
+
+        var cbl = CblFileBuilder.Create("No Chapter Number Test")
+            .AddBook("Fables", volume: "1")
+            .Build();
+
+        var filePath = helper.WriteCblToDisk(cbl);
+        var svc = helper.CreateImportService();
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
+
+        Assert.Equal(CblImportResult.Success, summary.Success);
+        Assert.Single(summary.SuccessfulInserts);
+        Assert.Equal(ch1Ids.ChapterId, summary.SuccessfulInserts.First().ChapterId);
+    }
+
+    /// <summary>
+    /// When no volume is specified, chapters should be searched across all volumes.
+    /// </summary>
+    [Fact]
+    public async Task ValidateList_NoVolume_SearchesAcrossAllVolumes()
+    {
+        var (unitOfWork, _, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("manga-loose-leaf.json");
+
+        // One Piece has Volume 1 (chapters 1-3) and Volume 2 (chapters 4-6)
+        var ch5Ids = seed.Lookup[("One Piece", "2", "5")];
+
+        // No volume specified, chapter 5 is in volume 2
+        var cbl = CblFileBuilder.Create("Cross Volume Search Test")
+            .AddBook("One Piece", number: "5")
+            .Build();
+
+        var filePath = helper.WriteCblToDisk(cbl);
+        var svc = helper.CreateImportService();
+        var summary = await svc.ValidateList(seed.User.Id, filePath);
+
+        Assert.Equal(CblImportResult.Success, summary.Success);
+        Assert.Single(summary.SuccessfulInserts);
+        Assert.Equal(ch5Ids.ChapterId, summary.SuccessfulInserts.First().ChapterId);
+    }
+
+    #endregion
+
+    #region Group 16: SyncReadingListAsync
+
+    [Fact]
+    public async Task SyncReadingListAsync_WithRemapRule_MatchesNewItemAndUpdatesMetadata()
+    {
+        var (unitOfWork, context, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("simple-comic.json");
+
+        var fablesIds = seed.Lookup[("Fables", "1", "1")];
+        var batmanIds = seed.Lookup[("Batman", "2016", "1")];
+
+        // Pre-create a syncable reading list with 1 existing item (Fables #1)
+        var rl = new ReadingListBuilder("Sync Test")
+            .WithAppUserId(seed.User.Id)
+            .WithItem(new ReadingListItemBuilder(0, fablesIds.SeriesId, fablesIds.VolumeId, fablesIds.ChapterId).Build())
+            .Build();
+        rl.Provider = ReadingListProvider.Url;
+        rl.SourcePath = "test/list.cbl";
+        unitOfWork.ReadingListRepository.Add(rl);
+        await unitOfWork.CommitAsync();
+
+        // Add a remap rule: "Dark Knight" -> Batman series
+        unitOfWork.RemapRuleRepository.Add(new ReadingListRemapRule
+        {
+            NormalizedCblSeriesName = "Dark Knight".ToNormalized(),
+            CblSeriesName = "Dark Knight",
+            SeriesId = batmanIds.SeriesId,
+            SeriesNameAtMapping = "Batman",
+            AppUserId = seed.User.Id,
+            CreatedUtc = DateTime.UtcNow
+        });
+        await unitOfWork.CommitAsync();
+
+        // Build CBL with 2 items + metadata dates
+        var cbl = CblFileBuilder.Create("Sync Test")
+            .AddBook("Fables", volume: "1", number: "1")
+            .AddBook("Dark Knight", volume: "2016", number: "1")
+            .Build();
+        cbl.StartYear = 2020;
+        cbl.StartMonth = 3;
+        cbl.EndYear = 2021;
+        cbl.EndMonth = 6;
+
+        var cblXml = CblTestHelper.SerializeCblToXml(cbl);
+
+        // Set up mocks
+        var githubService = Substitute.For<ICblGithubService>();
+        githubService.GetFileSha("test/list.cbl").Returns(Task.FromResult("new-sha"));
+        githubService.GetFileContent("test/list.cbl").Returns(Task.FromResult(cblXml));
+
+        var dirService = new DirectoryService(
+            Substitute.For<ILogger<DirectoryService>>(),
+            new System.IO.Abstractions.FileSystem());
+
+        var readingListService = Substitute.For<IReadingListService>();
+
+        var svc = helper.CreateSyncImportService(githubService, dirService, readingListService);
+
+        // Act
+        await svc.SyncReadingListAsync(seed.User.Id, rl.Id);
+
+        // Re-fetch from DB to verify persisted state
+        var synced = await unitOfWork.ReadingListRepository
+            .GetReadingListByIdAsync(rl.Id, ReadingListIncludes.Items);
+
+        Assert.NotNull(synced);
+        Assert.Equal(2, synced!.Items.Count);
+
+        // Verify item ordering and entity mapping
+        var items = synced.Items.OrderBy(i => i.Order).ToList();
+        Assert.Equal(fablesIds.SeriesId, items[0].SeriesId);
+        Assert.Equal(fablesIds.ChapterId, items[0].ChapterId);
+        Assert.Equal(batmanIds.SeriesId, items[1].SeriesId);
+        Assert.Equal(batmanIds.ChapterId, items[1].ChapterId);
+
+        // Verify metadata updated from CBL
+        Assert.Equal(2020, synced.StartingYear);
+        Assert.Equal(3, synced.StartingMonth);
+        Assert.Equal(2021, synced.EndingYear);
+        Assert.Equal(6, synced.EndingMonth);
+
+        // Verify sync timestamps were set
+        Assert.NotNull(synced.LastSyncedUtc);
+        Assert.NotNull(synced.LastSyncCheckUtc);
+
+        // Verify side effect methods were invoked
+        await readingListService.Received(1).CalculateReadingListAgeRating(Arg.Any<ReadingList>());
+        await readingListService.Received(1).CalculateStartAndEndDates(Arg.Any<ReadingList>());
+    }
+
+    #endregion
+
+    #region Group 17: V2 Tags
+
+    [Fact]
+    public async Task UpsertReadingList_V2WithTags_CreatesTagsOnReadingList()
+    {
+        var (unitOfWork, _, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("simple-comic.json");
+
+        var cbl = CblFileBuilder.Create("Tagged List")
+            .AsV2()
+            .WithTags("DC Comics", "Vertigo")
+            .AddBook("Fables", volume: "1", number: "1")
+            .Build();
+
+        var filePath = helper.WriteCblV2ToDisk(cbl);
+        var svc = helper.CreateImportService();
+        var decisions = new CblImportDecisions
+        {
+            ItemResolutions = new Dictionary<int, CblItemDecision>(),
+            SaveAsRemapRules = false
+        };
+        var summary = await svc.UpsertReadingList(seed.User.Id, filePath, decisions);
+
+        var rl = await unitOfWork.ReadingListRepository.GetReadingListByTitleAsync(
+            "Tagged List", seed.User.Id, ReadingListIncludes.Items | ReadingListIncludes.Tags);
+        Assert.NotNull(rl);
+        Assert.Equal(2, rl!.Tags.Count);
+        Assert.Contains(rl.Tags, t => t.Title == "DC Comics");
+        Assert.Contains(rl.Tags, t => t.Title == "Vertigo");
+    }
+
+    [Fact]
+    public async Task UpsertReadingList_V2WithTags_NormalizesTagTitles()
+    {
+        var (unitOfWork, _, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("simple-comic.json");
+
+        var cbl = CblFileBuilder.Create("Normalized Tags")
+            .AsV2()
+            .WithTags("DC Comics", "dc comics", "DC COMICS")
+            .AddBook("Fables", volume: "1", number: "1")
+            .Build();
+
+        var filePath = helper.WriteCblV2ToDisk(cbl);
+        var svc = helper.CreateImportService();
+        var decisions = new CblImportDecisions
+        {
+            ItemResolutions = new Dictionary<int, CblItemDecision>(),
+            SaveAsRemapRules = false
+        };
+        await svc.UpsertReadingList(seed.User.Id, filePath, decisions);
+
+        var rl = await unitOfWork.ReadingListRepository.GetReadingListByTitleAsync(
+            "Normalized Tags", seed.User.Id, ReadingListIncludes.Items | ReadingListIncludes.Tags);
+        Assert.NotNull(rl);
+        Assert.Single(rl!.Tags);
+        Assert.Equal("DC Comics", rl.Tags.First().Title);
+    }
+
+    [Fact]
+    public async Task UpsertReadingList_V2WithEmptyTags_NoTagsCreated()
+    {
+        var (unitOfWork, _, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("simple-comic.json");
+
+        var cbl = CblFileBuilder.Create("No Tags List")
+            .AsV2()
+            .AddBook("Fables", volume: "1", number: "1")
+            .Build();
+
+        var filePath = helper.WriteCblV2ToDisk(cbl);
+        var svc = helper.CreateImportService();
+        var decisions = new CblImportDecisions
+        {
+            ItemResolutions = new Dictionary<int, CblItemDecision>(),
+            SaveAsRemapRules = false
+        };
+        await svc.UpsertReadingList(seed.User.Id, filePath, decisions);
+
+        var rl = await unitOfWork.ReadingListRepository.GetReadingListByTitleAsync(
+            "No Tags List", seed.User.Id, ReadingListIncludes.Items | ReadingListIncludes.Tags);
+        Assert.NotNull(rl);
+        Assert.Empty(rl!.Tags);
+    }
+
+    [Fact]
+    public async Task UpsertReadingList_V2ReImportWithNewTags_MergesTags()
+    {
+        var (unitOfWork, _, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("simple-comic.json");
+
+        // First import with one tag
+        var cbl1 = CblFileBuilder.Create("Merge Tags")
+            .AsV2()
+            .WithTags("Vertigo")
+            .AddBook("Fables", volume: "1", number: "1")
+            .Build();
+
+        var filePath1 = helper.WriteCblV2ToDisk(cbl1);
+        var svc = helper.CreateImportService();
+        var decisions = new CblImportDecisions
+        {
+            ItemResolutions = new Dictionary<int, CblItemDecision>(),
+            SaveAsRemapRules = false
+        };
+        await svc.UpsertReadingList(seed.User.Id, filePath1, decisions);
+
+        // Re-import with original tag plus a new one
+        var cbl2 = CblFileBuilder.Create("Merge Tags")
+            .AsV2()
+            .WithTags("Vertigo", "DC Comics")
+            .AddBook("Fables", volume: "1", number: "1")
+            .Build();
+
+        var filePath2 = helper.WriteCblV2ToDisk(cbl2);
+        await svc.UpsertReadingList(seed.User.Id, filePath2, decisions);
+
+        var rl = await unitOfWork.ReadingListRepository.GetReadingListByTitleAsync(
+            "Merge Tags", seed.User.Id, ReadingListIncludes.Items | ReadingListIncludes.Tags);
+        Assert.NotNull(rl);
+        Assert.Equal(2, rl!.Tags.Count);
+        Assert.Contains(rl.Tags, t => t.Title == "Vertigo");
+        Assert.Contains(rl.Tags, t => t.Title == "DC Comics");
+    }
+
+    [Fact]
+    public async Task UpsertReadingList_V2ReImportWithRemovedTags_RemovesTags()
+    {
+        var (unitOfWork, _, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("simple-comic.json");
+
+        // First import with two tags
+        var cbl1 = CblFileBuilder.Create("Remove Tags")
+            .AsV2()
+            .WithTags("Vertigo", "DC Comics")
+            .AddBook("Fables", volume: "1", number: "1")
+            .Build();
+
+        var filePath1 = helper.WriteCblV2ToDisk(cbl1);
+        var svc = helper.CreateImportService();
+        var decisions = new CblImportDecisions
+        {
+            ItemResolutions = new Dictionary<int, CblItemDecision>(),
+            SaveAsRemapRules = false
+        };
+        await svc.UpsertReadingList(seed.User.Id, filePath1, decisions);
+
+        // Re-import with only one tag
+        var cbl2 = CblFileBuilder.Create("Remove Tags")
+            .AsV2()
+            .WithTags("Vertigo")
+            .AddBook("Fables", volume: "1", number: "1")
+            .Build();
+
+        var filePath2 = helper.WriteCblV2ToDisk(cbl2);
+        await svc.UpsertReadingList(seed.User.Id, filePath2, decisions);
+
+        var rl = await unitOfWork.ReadingListRepository.GetReadingListByTitleAsync(
+            "Remove Tags", seed.User.Id, ReadingListIncludes.Items | ReadingListIncludes.Tags);
+        Assert.NotNull(rl);
+        Assert.Single(rl!.Tags);
+        Assert.Equal("Vertigo", rl.Tags.First().Title);
+    }
+
+    [Fact]
+    public async Task UpsertReadingList_V2TagsSharedAcrossLists_ReusesSameEntity()
+    {
+        var (unitOfWork, context, _) = await CreateDatabase();
+        using var helper = new CblTestHelper(unitOfWork);
+        var seed = await helper.SeedLibrary("simple-comic.json");
+
+        var svc = helper.CreateImportService();
+        var decisions = new CblImportDecisions
+        {
+            ItemResolutions = new Dictionary<int, CblItemDecision>(),
+            SaveAsRemapRules = false
+        };
+
+        // First list with shared tag
+        var cbl1 = CblFileBuilder.Create("List A")
+            .AsV2()
+            .WithTags("Shared Tag")
+            .AddBook("Fables", volume: "1", number: "1")
+            .Build();
+        var filePath1 = helper.WriteCblV2ToDisk(cbl1);
+        await svc.UpsertReadingList(seed.User.Id, filePath1, decisions);
+
+        // Second list with same tag
+        var cbl2 = CblFileBuilder.Create("List B")
+            .AsV2()
+            .WithTags("Shared Tag")
+            .AddBook("Fables", volume: "1", number: "2")
+            .Build();
+        var filePath2 = helper.WriteCblV2ToDisk(cbl2);
+        await svc.UpsertReadingList(seed.User.Id, filePath2, decisions);
+
+        var rlA = await unitOfWork.ReadingListRepository.GetReadingListByTitleAsync(
+            "List A", seed.User.Id, ReadingListIncludes.Items | ReadingListIncludes.Tags);
+        var rlB = await unitOfWork.ReadingListRepository.GetReadingListByTitleAsync(
+            "List B", seed.User.Id, ReadingListIncludes.Items | ReadingListIncludes.Tags);
+
+        Assert.NotNull(rlA);
+        Assert.NotNull(rlB);
+        Assert.Single(rlA!.Tags);
+        Assert.Single(rlB!.Tags);
+
+        // Both lists should reference the same ReadingListTag entity (same Id)
+        Assert.Equal(rlA.Tags.First().Id, rlB.Tags.First().Id);
     }
 
     #endregion

@@ -16,11 +16,13 @@ import {TextResonse} from '../_types/text-response';
 import {FilterV2} from '../_models/metadata/v2/filter-v2';
 import {Rating} from "../_models/rating";
 import {Recommendation} from "../_models/series-detail/recommendation";
-import {ExternalSeriesDetail} from "../_models/series-detail/external-series-detail";
+import {ExternalEditionDto, ExternalSeriesDetail} from "../_models/series-detail/external-series-detail";
 import {NextExpectedChapter} from "../_models/series-detail/next-expected-chapter";
 import {QueryContext} from "../_models/metadata/v2/query-context";
-import {ExternalSeriesMatch} from "../_models/series-detail/external-series-match";
-import {FilterField} from "../_models/metadata/v2/filter-field";
+import {MatchSeriesResult} from "../_models/series-detail/match-series-result";
+import {SeriesFilterField} from "../_models/metadata/v2/series-filter-field";
+import {MatchSeriesInfo} from "../_models/kavitaplus/match-series-info";
+import {MetadataProvider} from "../_models/kavitaplus/metadata-provider.enum";
 
 @Injectable({
   providedIn: 'root'
@@ -34,7 +36,7 @@ export class SeriesService {
   paginatedResults: PaginatedResult<Series[]> = new PaginatedResult<Series[]>();
   paginatedSeriesForTagsResults: PaginatedResult<Series[]> = new PaginatedResult<Series[]>();
 
-  getAllSeriesV2(pageNum?: number, itemsPerPage?: number, filter?: FilterV2<FilterField>, context: QueryContext = QueryContext.None, userId?: number) {
+  getAllSeriesV2(pageNum?: number, itemsPerPage?: number, filter?: FilterV2<SeriesFilterField>, context: QueryContext = QueryContext.None, userId?: number) {
     let params = new HttpParams();
     params = this.utilityService.addPaginationIfExists(params, pageNum, itemsPerPage);
 
@@ -51,7 +53,7 @@ export class SeriesService {
     );
   }
 
-  getSeriesForLibraryV2(pageNum?: number, itemsPerPage?: number, filter?: FilterV2<FilterField>) {
+  getSeriesForLibraryV2(pageNum?: number, itemsPerPage?: number, filter?: FilterV2<SeriesFilterField>) {
     let params = new HttpParams();
     params = this.utilityService.addPaginationIfExists(params, pageNum, itemsPerPage);
     const data = filter || {};
@@ -111,7 +113,7 @@ export class SeriesService {
     return this.httpClient.post<void>(this.baseUrl + 'reader/mark-unread', {seriesId});
   }
 
-  getRecentlyAdded(pageNum?: number, itemsPerPage?: number, filter?: FilterV2<FilterField>) {
+  getRecentlyAdded(pageNum?: number, itemsPerPage?: number, filter?: FilterV2<SeriesFilterField>) {
     let params = new HttpParams();
     params = this.utilityService.addPaginationIfExists(params, pageNum, itemsPerPage);
 
@@ -130,7 +132,7 @@ export class SeriesService {
     return this.httpClient.post<SeriesGroup[]>(this.baseUrl + 'series/recently-updated-series', {}, {params});
   }
 
-  getWantToRead(pageNum?: number, itemsPerPage?: number, filter?: FilterV2<FilterField>, userId: number | null = null): Observable<PaginatedResult<Series[]>> {
+  getWantToRead(pageNum?: number, itemsPerPage?: number, filter?: FilterV2<SeriesFilterField>, userId: number | null = null): Observable<PaginatedResult<Series[]>> {
     let params = new HttpParams();
     params = this.utilityService.addPaginationIfExists(params, pageNum, itemsPerPage);
     const data = filter || {};
@@ -154,7 +156,7 @@ export class SeriesService {
     }));
   }
 
-  getOnDeck(pageNum?: number, itemsPerPage?: number, filter?: FilterV2<FilterField>, libraryId: number = 0, userId: number | null = null) {
+  getOnDeck(pageNum?: number, itemsPerPage?: number, filter?: FilterV2<SeriesFilterField>, libraryId: number = 0, userId: number | null = null) {
     let params = new HttpParams();
     params = this.utilityService.addPaginationIfExists(params, pageNum, itemsPerPage);
     const data = filter || {};
@@ -219,10 +221,11 @@ export class SeriesService {
     contains: Array<number>, others: Array<number>, prequels: Array<number>,
     sequels: Array<number>, sideStories: Array<number>, spinOffs: Array<number>,
     alternativeSettings: Array<number>, alternativeVersions: Array<number>,
-    doujinshis: Array<number>, editions: Array<number>, annuals: Array<number>) {
+    doujinshis: Array<number>, editions: Array<number>, annuals: Array<number>,
+    cameos: Array<number>) {
     return this.httpClient.post(this.baseUrl + 'series/update-related?seriesId=' + seriesId,
     {seriesId, adaptations, characters, sequels, prequels, contains, others, sideStories, spinOffs,
-     alternativeSettings, alternativeVersions, doujinshis, editions, annuals});
+     alternativeSettings, alternativeVersions, doujinshis, editions, annuals, cameos});
   }
 
   getSeriesDetail(seriesId: number) {
@@ -237,8 +240,8 @@ export class SeriesService {
     return this.httpClient.post(this.baseUrl + 'series/remove-from-on-deck?seriesId=' + seriesId, {});
   }
 
-  getExternalSeriesDetails(aniListId?: number, malId?: number, seriesId?: number) {
-    return this.httpClient.get<ExternalSeriesDetail>(this.baseUrl + 'series/external-series-detail?aniListId=' + (aniListId || 0) + '&malId=' + (malId || 0) + '&seriesId=' + (seriesId || 0));
+  getExternalSeriesDetails(aniListId?: number, malId?: number, mangaBakaId?: number, seriesId?: number) {
+    return this.httpClient.get<ExternalSeriesDetail>(this.baseUrl + 'series/external-series-detail?aniListId=' + (aniListId || 0) + '&malId=' + (malId || 0) + '&mangaBakaId=' + (mangaBakaId || 0) + '&seriesId=' + (seriesId || 0));
   }
 
   getNextExpectedChapterDate(seriesId: number) {
@@ -246,11 +249,26 @@ export class SeriesService {
   }
 
   matchSeries(model: any) {
-    return this.httpClient.post<Array<ExternalSeriesMatch>>(this.baseUrl + 'series/match', model);
+    return this.httpClient.post<MatchSeriesResult>(this.baseUrl + 'series/match', model);
   }
 
-  updateMatch(seriesId: number, series: ExternalSeriesDetail) {
-    return this.httpClient.post<string>(this.baseUrl + `series/update-match?seriesId=${seriesId}&aniListId=${series.aniListId || 0}&malId=${series.malId || 0}&cbrId=${series.cbrId || 0}`, {}, TextResonse);
+  updateMatch(seriesId: number, series: ExternalSeriesDetail, edition: ExternalEditionDto | null, provider: MetadataProvider | null) {
+    const ids = {
+      aniListId: series.aniListId ?? null,
+      malId: series.malId ?? null,
+      cbrId: series.cbrId ?? null,
+      mangabakaId: series.mangabakaId ?? null,
+      mangaBakaEditionId: edition?.id ?? null, // NOTE: If we have other providers with editions. This will need updating
+      hardcoverId: series.hardcoverId ?? null,
+      isStandAlone: series.isStandAlone,
+    };
+
+    let url = this.baseUrl + `series/update-match?seriesId=${seriesId}`;
+    if (provider !== null) {
+      url += `&provider=${provider}`;
+    }
+
+    return this.httpClient.post<string>(url, ids, TextResonse);
   }
 
   updateDontMatch(seriesId: number, dontMatch: boolean) {
@@ -259,5 +277,9 @@ export class SeriesService {
 
   getSeriesWithAnnotations() {
     return this.httpClient.get<Series[]>(this.baseUrl + 'series/series-with-annotations');
+  }
+
+  getMatchInfo(seriesId: number) {
+    return this.httpClient.get<MatchSeriesInfo>(this.baseUrl + 'series/match-info?seriesId=' + seriesId);
   }
 }

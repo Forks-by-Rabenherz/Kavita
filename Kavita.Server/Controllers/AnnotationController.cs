@@ -9,7 +9,7 @@ using Kavita.API.Services;
 using Kavita.Common;
 using Kavita.Common.Helpers;
 using Kavita.Models.Constants;
-using Kavita.Models.DTOs.Metadata.Browse.Requests;
+using Kavita.Models.DTOs.Filtering.v2.Requests;
 using Kavita.Models.DTOs.Reader;
 using Kavita.Server.Attributes;
 using Kavita.Server.Extensions;
@@ -31,7 +31,7 @@ public class AnnotationController(
     /// <param name="userParams"></param>
     /// <returns></returns>
     [HttpPost("all-filtered")]
-    public async Task<ActionResult<PagedList<AnnotationDto>>> GetAnnotationsForBrowse(BrowseAnnotationFilterDto filter, [FromQuery] UserParams? userParams)
+    public async Task<ActionResult<PagedList<AnnotationDto>>> GetAnnotationsForBrowse(AnnotationFilterDto filter, [FromQuery] UserParams? userParams)
     {
         userParams ??= UserParams.Default;
 
@@ -46,6 +46,7 @@ public class AnnotationController(
     /// </summary>
     /// <param name="chapterId"></param>
     /// <returns></returns>
+    [ChapterAccess]
     [HttpGet("all")]
     public async Task<ActionResult<IEnumerable<AnnotationDto>>> GetAnnotations(int chapterId)
     {
@@ -57,6 +58,7 @@ public class AnnotationController(
     /// </summary>
     /// <param name="seriesId"></param>
     /// <returns></returns>
+    [SeriesAccess]
     [HttpGet("all-for-series")]
     public async Task<ActionResult<AnnotationDto>> GetAnnotationsBySeries(int seriesId)
     {
@@ -69,9 +71,18 @@ public class AnnotationController(
     /// <param name="annotationId"></param>
     /// <returns></returns>
     [HttpGet("{annotationId}")]
-    public async Task<ActionResult<AnnotationDto>> GetAnnotation(int annotationId)
+    public async Task<ActionResult<AnnotationDto?>> GetAnnotation(int annotationId)
     {
-        return Ok(await unitOfWork.UserRepository.GetAnnotationDtoById(UserId, annotationId));
+        var annotation = await unitOfWork.UserRepository.GetAnnotationDtoById(UserId, annotationId);
+        if (annotation == null) return NotFound();
+
+        if (!await unitOfWork.UserRepository.HasAccessToChapter(UserId, annotation.ChapterId,
+                HttpContext.RequestAborted))
+        {
+            return NotFound();
+        }
+
+        return Ok(annotation);
     }
 
     /// <summary>
@@ -89,7 +100,7 @@ public class AnnotationController(
         }
         catch (KavitaException ex)
         {
-            return BadRequest(await localizationService.Translate(UserId, ex.Message));
+            return BadRequest(await localizationService.TranslateAsync(UserId, ex.Message));
         }
     }
 
@@ -108,7 +119,7 @@ public class AnnotationController(
         }
         catch (KavitaException ex)
         {
-            return BadRequest(await localizationService.Translate(UserId, ex.Message));
+            return BadRequest(await localizationService.TranslateAsync(UserId, ex.Message));
         }
     }
 
@@ -186,7 +197,7 @@ public class AnnotationController(
     public async Task<ActionResult> DeleteAnnotation(int annotationId)
     {
         var annotation = await unitOfWork.AnnotationRepository.GetAnnotation(annotationId);
-        if (annotation == null || annotation.AppUserId != UserId) return BadRequest(await localizationService.Translate(UserId, "annotation-delete"));
+        if (annotation == null || annotation.AppUserId != UserId) return BadRequest(await localizationService.TranslateAsync(UserId, "annotation-delete"));
 
         unitOfWork.AnnotationRepository.Remove(annotation);
         await unitOfWork.CommitAsync();
@@ -223,7 +234,7 @@ public class AnnotationController(
     /// <returns></returns>
     [HttpPost("export-filter")]
     [DisallowRole(PolicyConstants.ReadOnlyRole)]
-    public async Task<IActionResult> ExportAnnotationsFilter(BrowseAnnotationFilterDto filter, [FromQuery] UserParams? userParams)
+    public async Task<IActionResult> ExportAnnotationsFilter(AnnotationFilterDto filter, [FromQuery] UserParams? userParams)
     {
         userParams ??= UserParams.Default;
 

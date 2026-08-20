@@ -13,6 +13,7 @@ using Kavita.Common;
 using Kavita.Common.EnvironmentInfo;
 using Kavita.Models;
 using Kavita.Models.Constants;
+using Kavita.Models.DTOs.KavitaPlus.Scrobble;
 using Kavita.Models.DTOs.Settings;
 using Kavita.Models.Entities;
 using Kavita.Models.Entities.Enums;
@@ -151,6 +152,7 @@ public static class Seed
                 new() {Key = ServerSettingKey.TaskScan, Value = "daily"},
                 new() {Key = ServerSettingKey.TaskBackup, Value = "daily"},
                 new() {Key = ServerSettingKey.TaskCleanup, Value = "daily"},
+                new() {Key = ServerSettingKey.TaskCblSync, Value = "0 4 * * *"}, // 4am daily
                 new() {Key = ServerSettingKey.LoggingLevel, Value = "Debug"},
                 new()
                 {
@@ -263,6 +265,7 @@ public static class Seed
                 EnableTags = false,
                 EnableGenres = true,
                 EnableLocalizedName = false,
+                EnableName = false,
                 FirstLastPeopleNaming = true,
                 EnableCoverImage = true,
                 EnableChapterTitle = false,
@@ -270,7 +273,10 @@ public static class Seed
                 EnableChapterPublisher = true,
                 EnableChapterCoverImage = false,
                 EnableChapterReleaseDate = true,
-                PersonRoles = [PersonRole.Writer, PersonRole.CoverArtist, PersonRole.Character]
+                PersonRoles = [PersonRole.Writer, PersonRole.CoverArtist, PersonRole.Character],
+                GlobalNameLanguages = "en",
+                GlobalLocalizedNameLanguages = "ja-Latn",
+                LibraryLanguageTitleOverrides = []
             };
             await context.MetadataSettings.AddAsync(existing);
         }
@@ -278,5 +284,46 @@ public static class Seed
 
         await context.SaveChangesAsync();
 
+    }
+
+    public static async Task SeedScrobbleProviders(IDataContext context)
+    {
+        await context.Database.EnsureCreatedAsync();
+
+        var allUsers = await context.Users.ToListAsync();
+
+        foreach (var user in allUsers)
+        {
+            var missingProviders = Enum.GetValues<ScrobbleProvider>()
+                .Where(p => p != ScrobbleProvider.Kavita && p != ScrobbleProvider.Cbr)
+                .Where(p => !user.ScrobbleProviders.ContainsKey(p))
+                .ToList();
+
+            foreach (var provider in missingProviders)
+            {
+                user.ScrobbleProviders[provider] = new AppUserScrobbleProvider
+                {
+                    Provider = provider,
+                    Settings = new ScrobbleProviderSettingsDto()
+                    {
+
+                        ProgressScrobbling = true,
+                        RatingScrobbling = true,
+                        WantToReadSync = true,
+                        AllLibraries = true
+                    }
+                };
+            }
+
+            if (missingProviders.Count > 0)
+            {
+                context.Users.Update(user);
+            }
+        }
+
+        if (context.ChangeTracker.HasChanges())
+        {
+            await context.SaveChangesAsync();
+        }
     }
 }

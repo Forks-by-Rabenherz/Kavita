@@ -28,7 +28,7 @@ public class UsersController(
     IMapper mapper,
     IEventHub eventHub,
     ILocalizationService localizationService,
-    ILicenseService licenseService)
+    IScrobblingService scrobblingService)
     : BaseApiController
 {
     [Authorize(Policy = PolicyGroups.AdminPolicy)]
@@ -50,7 +50,7 @@ public class UsersController(
 
         if (await unitOfWork.CommitAsync()) return Ok();
 
-        return BadRequest(await localizationService.Translate(UserId, "generic-user-delete"));
+        return BadRequest(await localizationService.TranslateAsync(UserId, "generic-user-delete"));
     }
 
     /// <summary>
@@ -103,7 +103,7 @@ public class UsersController(
     public async Task<ActionResult<bool>> HasReadingProgress(int libraryId)
     {
         var library = await unitOfWork.LibraryRepository.GetLibraryForIdAsync(libraryId);
-        if (library == null) return BadRequest(await localizationService.Translate(UserId, "library-doesnt-exist"));
+        if (library == null) return BadRequest(await localizationService.TranslateAsync(UserId, "library-doesnt-exist"));
         return Ok(await unitOfWork.AppUserProgressRepository.UserHasProgress(library.Type, UserId));
     }
 
@@ -150,18 +150,10 @@ public class UsersController(
             .Select(l => l.Id).ToList();
 
         preferencesDto.SocialPreferences.SocialLibraries = preferencesDto.SocialPreferences.SocialLibraries
-            .Where(l => allLibs.Contains(l)).ToList();
+            .Where(allLibs.Contains).ToList();
         existingPreferences.SocialPreferences = preferencesDto.SocialPreferences;
 
         existingPreferences.OpdsPreferences = preferencesDto.OpdsPreferences;
-
-        if (await licenseService.HasActiveLicense(ct: HttpContext.RequestAborted))
-        {
-            existingPreferences.AniListScrobblingEnabled = preferencesDto.AniListScrobblingEnabled;
-            existingPreferences.WantToReadSync = preferencesDto.WantToReadSync;
-        }
-
-
 
         if (preferencesDto.Theme != null && existingPreferences.Theme.Id != preferencesDto.Theme?.Id)
         {
@@ -169,16 +161,14 @@ public class UsersController(
             existingPreferences.Theme = theme ?? await unitOfWork.SiteThemeRepository.GetDefaultTheme();
         }
 
-
         if (localizationService.GetLocales().Select(l => l.FileName).Contains(preferencesDto.Locale))
         {
             existingPreferences.Locale = preferencesDto.Locale;
         }
 
-
         unitOfWork.UserRepository.Update(existingPreferences);
 
-        if (!await unitOfWork.CommitAsync()) return BadRequest(await localizationService.Translate(UserId, "generic-user-pref"));
+        if (!await unitOfWork.CommitAsync()) return BadRequest(await localizationService.TranslateAsync(UserId, "generic-user-pref"));
 
         await eventHub.SendMessageToAsync(MessageFactory.UserUpdate, MessageFactory.UserUpdateEvent(user.Id, user.UserName!), user.Id);
         return Ok(preferencesDto);
@@ -215,8 +205,8 @@ public class UsersController(
     [KPlus]
     [HttpGet("tokens")]
     [Authorize(Policy = PolicyGroups.AdminPolicy)]
-    public async Task<ActionResult<IEnumerable<UserTokenInfo>>> GetUserTokens()
+    public async Task<ActionResult<IEnumerable<UserTokenInfoDto>>> GetUserTokens()
     {
-        return Ok(await unitOfWork.UserRepository.GetUserTokenInfo());
+        return Ok(await scrobblingService.GetUserTokenInfo());
     }
 }

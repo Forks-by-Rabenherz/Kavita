@@ -18,7 +18,7 @@ import {Chapter, LooseLeafOrDefaultNumber} from "../_models/chapter";
 
 import {Volume} from "../_models/volume";
 import {UserCollection} from "../_models/collection-tag";
-import {ReadingList} from "../_models/reading-list";
+import {ReadingList} from "../_models/reading-list/reading-list";
 import {LibraryType} from "../_models/library/library";
 import {MangaFormat} from "../_models/manga-format";
 import {User} from "../_models/user/user";
@@ -26,6 +26,8 @@ import {PageBookmark} from "../_models/readers/page-bookmark";
 import {RelatedSeriesPair} from "../_single-module/related-tab/related-tab.component";
 import {ActionItem} from "../_models/actionables/action-item";
 import {SeriesGroup} from "../_models/series-group";
+import {AccountService} from "./account.service";
+import {Action} from "../_models/actionables/action";
 
 export interface ConfigCardFactoryBaseParameters<T> {
   shouldRenderAction?: (action: ActionItem<T>, entity: T, user: User) => boolean,
@@ -70,12 +72,14 @@ export class CardConfigFactory {
   private readonly router = inject(Router);
   private readonly relationshipPipe = new RelationshipPipe();
   private readonly entityTitleService = inject(EntityTitleService);
+  private readonly accountService = inject(AccountService);
 
   /**
    * Creates configuration for Series cards
    */
   forSeries(
-    params?: ConfigCardFactoryActionableParameters<Series>
+    params?: ConfigCardFactoryActionableParameters<Series>,
+    onDeck: boolean = false,
   ): ActionableCardConfiguration<Series> {
     const defaults: ActionableCardConfiguration<Series> = {
       allowSelection: false,
@@ -102,7 +106,7 @@ export class CardConfigFactory {
       showErrorFunc: (s) => s.pages === 0,
       ariaLabelFunc: (s) => s.name,
 
-      actionableFunc: (s) => this.actionFactory.getSeriesActions(),
+      actionableFunc: (s) => this.actionFactory.getSeriesActions(undefined, onDeck),
       readFunc: (s) => this.readerService.readSeries(s, false),
       clickFunc: (s) => this.router.navigate(['library', s.libraryId, 'series', s.id]),
 
@@ -353,6 +357,15 @@ export class CardConfigFactory {
    * Creates configuration for ReadingList cards
    */
   forReadingList(params?: ConfigCardFactoryActionableParameters<ReadingList>): ActionableCardConfiguration<ReadingList> {
+    const defaultShouldRenderAction = (action: ActionItem<ReadingList>, entity: ReadingList, user: User) => {
+      switch (action.action) {
+        case Action.RefreshMetadata:
+          return entity.ownedUserName === this.accountService.currentUser()?.username;
+      }
+
+      return true;
+    }
+
     const defaults: ActionableCardConfiguration<ReadingList> = {
       allowSelection: true,
       selectionType: 'readingList',
@@ -373,7 +386,8 @@ export class CardConfigFactory {
       showErrorFunc: () => false,
       ariaLabelFunc: (r) => r.title,
 
-      actionableFunc: (r) => this.actionFactory.getReadingListActions(params?.shouldRenderAction),
+      actionableFunc: (r) => this.actionFactory
+        .getReadingListActions(params?.shouldRenderAction ?? defaultShouldRenderAction),
       readFunc: null,
       clickFunc: (r) => this.router.navigate(['lists', r.id]),
       downloadItemFunc: (r) => this.downloadService.getItemForEntity(r, true),

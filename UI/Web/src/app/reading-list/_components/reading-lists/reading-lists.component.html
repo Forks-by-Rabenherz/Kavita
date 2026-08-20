@@ -1,23 +1,28 @@
 <div class="main-container container-fluid">
   <ng-container *transloco="let t; prefix: 'reading-lists'">
-    <app-side-nav-companion-bar>
+    <app-side-nav-companion-bar [hasFilter]="true" (filterOpen)="filterOpen.emit($event)" [filterActive]="filterActive()">
       <h4 title>
         <span>{{t('title')}}</span>
         <app-card-actionables [actions]="globalActions" (actionHandler)="performGlobalAction($event)" />
       </h4>
-      @if (pagination) {
-        <h5 subtitle class="subtitle-with-actionables">{{t('item-count', {num: pagination.totalItems | number})}}</h5>
+      @if (pagination()) {
+        <h5 subtitle class="subtitle-with-actionables">{{t('item-count', {num: pagination()!.totalItems | number})}}</h5>
       }
 
     </app-side-nav-companion-bar>
 
     <app-card-detail-layout
+      [gridColumnsTemplate]="'repeat(auto-fill, minmax(30rem, 1fr))'"
       [isLoading]="isLoadingLists()"
       [items]="listEntities()"
-      [pagination]="pagination"
+      [pagination]="pagination()!"
       [jumpBarKeys]="jumpbarKeys()"
-      [filteringDisabled]="true"
       [trackByIdentity]="trackByIdentity"
+      [refresh]="refresh"
+      [filterSettings]="filterSettings()"
+      [filterOpen]="filterOpen"
+      [filteringDisabled]="true"
+      (applyFilter)="updateFilter($event)"
     >
 
       <ng-template #topBar>
@@ -25,13 +30,10 @@
       </ng-template>
 
       <ng-template #cardItem let-item let-position="idx" >
-        <app-entity-card [entity]="item" [index]="position" [maxIndex]="listEntities().length" [config]="readingListConfig()"
-        (reload)="loadPage()" (dataChanged)="updateReadingList($event)">
-          <ng-template #title let-entity>
-            <app-promoted-icon [promoted]="entity.data.promoted" /> {{entity.data.title}}
-          </ng-template>
-        </app-entity-card>
-
+        <div class="px-1">
+          <app-reading-list [entity]="item" [index]="position" [maxIndex]="listEntities().length" [config]="readingListConfig()"
+                            (reload)="loadPage()" (dataChanged)="updateReadingList($event)" />
+        </div>
       </ng-template>
 
       <ng-template #noData>

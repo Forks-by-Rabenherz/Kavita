@@ -2462,7 +2462,7 @@ public class ExternalMetadataService : IExternalMetadataService
 
             if (!titlesByLanguage.TryGetValue(languageCode, out var titles)) continue;
 
-            foreach (var title in titles)
+            foreach (var title in titles.OrderByDescending(t => t.IsPrimary).ThenByDescending(t => t.IsOfficial))
             {
                 if (string.IsNullOrWhiteSpace(title.Title)) continue;
                 yield return (title.Title.Trim(), languageCode);
@@ -2799,6 +2799,12 @@ public class ExternalMetadataService : IExternalMetadataService
                 .ToList();
 
             var isVolumeBased = realVolumes.Count != 0;
+            // One book series (epub/pdf) have it as a special, which won't be caught in the above
+            if (series.Format is MangaFormat.Epub or MangaFormat.Pdf && chapters.Count == 1)
+            {
+                isVolumeBased = true;
+                realVolumes = series.Volumes;
+            }
 
             var maxVolume = (int)(realVolumes.Count != 0 ? realVolumes.Max(v => v.MaxNumber) : Parser.DefaultChapterNumber);
             var maxChapter = (int)chapters.Max(c => c.MaxNumber);
